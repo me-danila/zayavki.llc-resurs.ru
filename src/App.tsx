@@ -50,7 +50,7 @@ const App: React.FC = () => {
 
   const onSubmit = async (data: FormData) => {
     try {
-      const response = await fetch('localhost:5173/repair/', {
+      const response = await fetch('http://localhost:5173/repair/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -223,7 +223,9 @@ const App: React.FC = () => {
                       <input
                         type="number"
                         step="any"
-                        {...register(`items.${index}.price`, { valueAsNumber: true })}
+                        {...register(`items.${index}.price`, {
+                          setValueAs: (value) => value === '' ? undefined : Number(value),
+                        })}
                         className="resource-input text-sm"
                       />
                       {fields.length > 1 && (
