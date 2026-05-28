@@ -4,7 +4,7 @@ export const ItemSchema = z.object({
   name: z.string().min(1, "Обязательное поле"),
   purpose: z.string().min(1, "Обязательное поле"),
   licensePlate: z.string().min(1, "Обязательное поле"),
-  quantity: z.number().positive("Должно быть больше 0"),
+  quantity: z.string().min(1, "Обязательное поле"),
   price: z.number().positive("Должно быть больше 0").optional().nullable(),
 });
 

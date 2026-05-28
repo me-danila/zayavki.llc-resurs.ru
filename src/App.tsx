@@ -1,5 +1,6 @@
 import React from 'react';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
+import type { SubmitErrorHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Plus, Trash2, Send, ClipboardList } from 'lucide-react';
 import { FormSchema } from './types';
@@ -28,7 +29,7 @@ const App: React.FC = () => {
     resolver: zodResolver(FormSchema),
     defaultValues: {
       requestDate: new Date().toLocaleDateString('ru-RU'),
-      items: [{ name: '', purpose: '', licensePlate: '', quantity: 1, price: undefined }],
+      items: [{ name: '', purpose: '', licensePlate: '', quantity: '1', price: undefined }],
     },
   });
 
@@ -69,7 +70,7 @@ const App: React.FC = () => {
     }
   };
 
-  const onErrors = (errors: any) => {
+  const onErrors: SubmitErrorHandler<FormData> = (errors) => {
     console.error(errors);
   };
 
@@ -212,9 +213,8 @@ const App: React.FC = () => {
                     <div>
                       <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">Кол-во</label>
                       <input
-                        type="number"
-                        step="any"
-                        {...register(`items.${index}.quantity`, { valueAsNumber: true })}
+                        type="text"
+                        {...register(`items.${index}.quantity`)}
                         className="resource-input text-sm"
                       />
                     </div>
@@ -248,7 +248,7 @@ const App: React.FC = () => {
             <div className="flex justify-center pt-2">
               <button
                 type="button"
-                onClick={() => append({ name: '', purpose: '', licensePlate: '', quantity: 1, price: undefined })}
+                onClick={() => append({ name: '', purpose: '', licensePlate: '', quantity: '1', price: undefined })}
                 className="bg-white border-2 border-dashed border-gray-200 hover:border-resource-primary hover:text-resource-primary text-gray-400 w-full py-4 rounded-lg font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all cursor-pointer"
               >
                 <Plus className="w-5 h-5" />
