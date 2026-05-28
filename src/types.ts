@@ -5,10 +5,7 @@ export const ItemSchema = z.object({
   purpose: z.string().min(1, "Обязательное поле"),
   licensePlate: z.string().min(1, "Обязательное поле"),
   quantity: z.number().positive("Должно быть больше 0"),
-  price: z.preprocess(
-    (val) => (val === '' || val === null || (typeof val === 'number' && isNaN(val)) ? undefined : val),
-    z.number().positive("Должно быть больше 0").optional()
-  ),
+  price: z.number().positive("Должно быть больше 0").optional().nullable(),
 });
 
 export const FormSchema = z.object({
