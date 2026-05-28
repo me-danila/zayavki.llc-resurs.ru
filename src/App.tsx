@@ -50,7 +50,7 @@ const App: React.FC = () => {
 
   const onSubmit = async (data: FormData) => {
     try {
-      const response = await fetch('https://inadmissibly-unboarded-burt.ngrok-free.dev/repair/', {
+      const response = await fetch('localhost:5173/repair/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
