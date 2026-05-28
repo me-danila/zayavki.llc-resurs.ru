@@ -50,7 +50,7 @@ const App: React.FC = () => {
 
   const onSubmit = async (data: FormData) => {
     try {
-      const response = await fetch('http://localhost:5173/repair/', {
+      const response = await fetch('/repair/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
