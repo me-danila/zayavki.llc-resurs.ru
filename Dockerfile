@@ -9,9 +9,11 @@ RUN npm run build
 # Stage 2: Runtime
 FROM node:22-alpine
 WORKDIR /app
-# Копируем только то, что нужно для запуска vite preview
+# Копируем dist и конфиг, чтобы vite preview его видел
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/vite.config.ts ./
 COPY --from=build /app/package*.json ./
+
 # Устанавливаем только продакшн зависимости (vite нужен для preview)
 RUN npm install --omit=dev && npm install vite
 
