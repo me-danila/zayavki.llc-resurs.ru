@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary-resource: #FFCF00;
+  --color-error: #ef4444;
+  --color-surface-bg: #f9fafb;
+  --color-surface-text: #111827;
+  --color-surface-border: #e5e7eb;
+}
+
+@layer base {
+  body {
+    @apply bg-surface-bg text-surface-text antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+}
+
+@layer components {
+  .resource-input {
+    @apply w-full px-3 py-2.5 bg-white border border-surface-border rounded-lg outline-none transition-all focus:border-primary-resource focus:ring-2 focus:ring-primary-resource/20 disabled:bg-gray-50 disabled:text-gray-500;
+  }
+
+  .resource-label {
+    @apply block text-[11px] font-bold uppercase tracking-wider mb-1.5 text-gray-500;
+  }
+
+  .resource-button-primary {
+    @apply px-6 py-3 bg-gray-900 text-white rounded-lg font-bold uppercase text-xs tracking-widest hover:bg-black transition-all disabled:opacity-50;
+  }
+
+  .resource-button-secondary {
+    @apply px-4 py-2 bg-white text-gray-900 border border-gray-200 rounded-lg font-bold uppercase text-xs hover:bg-gray-50 transition-all;
+  }
+
+  .resource-button-danger {
+    @apply p-2 text-gray-400 hover:text-error hover:bg-red-50 rounded-lg transition-all;
+  }
+}
