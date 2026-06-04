@@ -11,6 +11,41 @@ import { ITEMS } from './data/itemsData';
 import { LICENSE_PLATES } from './data/licenceNumberData';
 import { Combobox } from './components/ui/Combobox';
 
+const parseOptionalPrice = (value: unknown) => {
+  const rawValue = String(value ?? '').trim();
+
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const compactValue = rawValue.replace(/[\s\u00a0]/g, '');
+  const priceLikeValue = compactValue.replace(/[^\d.,-]/g, '');
+
+  if (!priceLikeValue) {
+    return Number.NaN;
+  }
+
+  const isNegative = priceLikeValue.startsWith('-');
+  const unsignedValue = priceLikeValue.replace(/-/g, '');
+  const decimalSeparatorIndex = Math.max(
+    unsignedValue.lastIndexOf(','),
+    unsignedValue.lastIndexOf('.')
+  );
+
+  const normalizedValue = decimalSeparatorIndex === -1
+    ? unsignedValue.replace(/\D/g, '')
+    : [
+        unsignedValue.slice(0, decimalSeparatorIndex).replace(/\D/g, ''),
+        unsignedValue.slice(decimalSeparatorIndex + 1).replace(/\D/g, ''),
+      ].join('.');
+
+  if (!normalizedValue || normalizedValue === '.') {
+    return Number.NaN;
+  }
+
+  return Number(`${isNegative ? '-' : ''}${normalizedValue}`);
+};
+
 const App: React.FC = () => {
   const today = new Date().toLocaleDateString('ru-RU', {
     day: '2-digit',
@@ -221,13 +256,14 @@ const App: React.FC = () => {
                     <div className="relative">
                       <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">Цена</label>
                       <input
-                        type="number"
-                        step="any"
+                        type="text"
+                        inputMode="decimal"
                         {...register(`items.${index}.price`, {
-                          setValueAs: (value) => value === '' ? undefined : Number(value),
+                          setValueAs: parseOptionalPrice,
                         })}
                         className="resource-input text-sm"
                       />
+                      {errors.items?.[index]?.price && <p className="mt-1 text-[10px] text-red-500">{errors.items[index]?.price?.message}</p>}
                       {fields.length > 1 && (
                         <button
                           type="button"
