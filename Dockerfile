@@ -1,23 +1,14 @@
-# Stage 1: Build
-FROM node:22-alpine AS build
+# Один образ: ставит зависимости, собирает фронт, запускает сервер.
+FROM oven/bun:1.3.12-slim
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+
+# зависимости (кешируется отдельным слоем)
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+
+# исходники + сборка фронта (vite build → dist)
 COPY . .
-RUN npm run build
+RUN bun run build
 
-# Stage 2: Runtime
-FROM node:22-alpine
-WORKDIR /app
-# Копируем dist и конфиг, чтобы vite preview его видел
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/vite.config.ts ./
-COPY --from=build /app/package*.json ./
-
-# Устанавливаем только продакшн зависимости (vite нужен для preview)
-RUN npm install --omit=dev && npm install vite
-
-EXPOSE 5173
-
-# Запускаем vite preview на порту 5173, доступном извне контейнера
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "5173"]
+EXPOSE 3005
+CMD [ "bun", "run", "start" ]

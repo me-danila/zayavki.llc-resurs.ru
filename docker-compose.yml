@@ -1,7 +1,11 @@
 services:
-  web:
+  app:
     build: .
-    container_name: resurs-zayavki-app
+    container_name: zayavki-app
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "${PORT:-3005}:${PORT:-3005}"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
