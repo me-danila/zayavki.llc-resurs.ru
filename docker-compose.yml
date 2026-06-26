@@ -9,3 +9,8 @@ services:
       - .env
     environment:
       - NODE_ENV=production
+    volumes:
+      - gsmdata:/app/server/data
+
+volumes:
+  gsmdata: {}

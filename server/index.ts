@@ -4,19 +4,40 @@ import cors from "cors";
 import { join } from "path";
 import { existsSync } from "fs";
 import { repairRouter } from "./routes/repair";
+import { gsmRouter } from "./routes/gsm";
+import { attachUser } from "./auth/middleware";
+import { authRouter } from "./auth/routes";
 
 const app = express();
 const PORT = process.env.PORT || 3005;
+
+// За nginx (HTTPS-терминатор) — доверяем первому прокси: корректные req.ip и Secure-cookie.
+app.set("trust proxy", 1);
 
 // Собранный фронт (vite build → dist)
 const PUBLIC_DIR = join(process.cwd(), "dist");
 const INDEX_HTML = join(PUBLIC_DIR, "index.html");
 
-app.use(cors());
+// CORS сужаем: фронт ГСМ и API — один origin, для /api/gsm cross-origin не нужен,
+// поэтому cors намеренно НЕ применяется к /api/gsm. Для остального (вебхуки /repair,
+// статика) сохраняем прежнее поведение.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/gsm")) return next();
+  return cors()(req, res, next);
+});
+
 app.use(express.json());
+
+// Сессия ГСМ: вешаем чтение пользователя на всю ветку /api/gsm (включая /login —
+// attachUser ничего не блокирует). Гарды (requireAuth/requireManager) — на самих роутах.
+app.use("/api/gsm", attachUser);
+
+// API авторизации ГСМ (login/logout/me) — ПЕРЕД статикой.
+app.use(authRouter);
 
 // API
 app.use(repairRouter);
+app.use(gsmRouter);
 
 // Статика фронта
 app.use(express.static(PUBLIC_DIR));

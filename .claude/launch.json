@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev (bun --watch, front+API)",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--watch", "server/index.ts"],
+      "port": 3005
+    },
+    {
+      "name": "start (bun, front+API)",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["server/index.ts"],
+      "port": 3005
+    },
+    {
+      "name": "build (vite build → dist)",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "build"],
+      "port": 0
+    },
+    {
+      "name": "vite design HMR (:5173, API→:3005)",
+      "runtimeExecutable": "bunx",
+      "runtimeArgs": ["vite", "--port", "5173", "--host"],
+      "port": 5173
+    }
+  ]
+}

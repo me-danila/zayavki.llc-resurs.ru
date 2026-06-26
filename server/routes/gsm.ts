@@ -1,0 +1,333 @@
+// API товароучёта ГСМ (Этап 3). Префикс /api/gsm, JSON, фронт credentials:'include'.
+// attachUser смонтирован выше по цепочке (index.ts на /api/gsm), req.user — из сессии.
+// login/logout/me живут в server/auth/routes.ts (Этап 2) — здесь не дублируем.
+// Доверяем ТОЛЬКО серверу: role/site/автор берём из req.user, не из тела (канон §3.4).
+// Чужой :id (партия другого участка) → 404, не 403 (не раскрываем существование).
+
+import { Router, type Request, type Response } from "express";
+import { requireAuth, requireManager } from "../auth/middleware";
+import { LOTS } from "../../src/data/lotData";
+import * as lots from "../repo/lots";
+import * as receipts from "../repo/receipts";
+import * as writeoffs from "../repo/writeoffs";
+import * as users from "../repo/users";
+import { isValidDate } from "../lib/dates";
+
+export const gsmRouter = Router();
+
+// Допустимые участки — имена строкой из LOTS (src/data/lotData.tsx). siteId нет.
+const VALID_SITES = new Set<string>(LOTS);
+
+// Парсинг :id в положительное целое. NaN/<=0 → null (трактуем как not_found).
+function parseId(raw: string): number | null {
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+}
+
+// GET /api/gsm/lots — auth.
+// manager: все партии; worker: сервер фильтрует по session.site (query игнорируем).
+gsmRouter.get(
+  "/api/gsm/lots",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    const user = req.user!;
+    const list =
+      user.role === "manager"
+        ? lots.list({})
+        : lots.list({ site: user.site ?? "" });
+    res.status(200).json({ lots: list });
+  },
+);
+
+// POST /api/gsm/receipts — manager. Мульти-приход одной транзакцией.
+// Тело: {rows:[{receivedDate,site,name,code,unit?,quantity}]}.
+gsmRouter.post(
+  "/api/gsm/receipts",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const body = (req.body ?? {}) as { rows?: unknown };
+    const rows = body.rows;
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      res.status(400).json({ error: "empty_rows" });
+      return;
+    }
+
+    const parsed: receipts.ReceiptInput[] = [];
+
+    for (const raw of rows as unknown[]) {
+      if (!raw || typeof raw !== "object") {
+        res.status(400).json({ error: "invalid_row" });
+        return;
+      }
+      const r = raw as {
+        receivedDate?: unknown;
+        site?: unknown;
+        name?: unknown;
+        code?: unknown;
+        unit?: unknown;
+        quantity?: unknown;
+      };
+
+      const site = typeof r.site === "string" ? r.site.trim() : "";
+      const name = typeof r.name === "string" ? r.name.trim() : "";
+      const code = typeof r.code === "string" ? r.code.trim() : "";
+      const receivedDate =
+        typeof r.receivedDate === "string" ? r.receivedDate : "";
+      const unit =
+        typeof r.unit === "string" && r.unit.trim() ? r.unit.trim() : undefined;
+      const quantity =
+        typeof r.quantity === "number" ? r.quantity : Number(r.quantity);
+
+      if (!VALID_SITES.has(site)) {
+        res.status(400).json({ error: "invalid_site" });
+        return;
+      }
+      if (!name) {
+        res.status(400).json({ error: "invalid_name" });
+        return;
+      }
+      if (!code) {
+        res.status(400).json({ error: "invalid_code" });
+        return;
+      }
+      if (!isValidDate(receivedDate)) {
+        res.status(400).json({ error: "invalid_date" });
+        return;
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        res.status(400).json({ error: "invalid_quantity" });
+        return;
+      }
+
+      parsed.push({ receivedDate, site, name, code, unit, quantity });
+    }
+
+    try {
+      const { created } = receipts.createMany(parsed, req.user!.id);
+      res.status(201).json({ created });
+    } catch {
+      // Любой сбой валидации/вставки в репо — 400 (тело прошло поверхностную проверку).
+      res.status(400).json({ error: "invalid_receipts" });
+    }
+  },
+);
+
+// POST /api/gsm/lots/:id/writeoffs — worker-only.
+// Тело: {rows:[{date,licensePlate,amount,reason}]}. Серия в BEGIN IMMEDIATE.
+// Менеджер сюда писать не должен — 403.
+gsmRouter.post(
+  "/api/gsm/lots/:id/writeoffs",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    const user = req.user!;
+    // Списание — только воркер своего участка. Менеджер → 403 (не worker).
+    if (user.role !== "worker" || !user.site) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { rows?: unknown };
+    const rawRows = body.rows;
+    if (!Array.isArray(rawRows) || rawRows.length === 0) {
+      res.status(400).json({ error: "empty_rows" });
+      return;
+    }
+
+    const rows: writeoffs.WriteOffInput[] = [];
+    for (const raw of rawRows as unknown[]) {
+      if (!raw || typeof raw !== "object") {
+        res.status(400).json({ error: "invalid_row" });
+        return;
+      }
+      const r = raw as {
+        date?: unknown;
+        licensePlate?: unknown;
+        amount?: unknown;
+        reason?: unknown;
+      };
+      const date = typeof r.date === "string" ? r.date : "";
+      const licensePlate =
+        typeof r.licensePlate === "string" ? r.licensePlate : "";
+      const reason = typeof r.reason === "string" ? r.reason : "";
+      const amount =
+        typeof r.amount === "number" ? r.amount : Number(r.amount);
+      rows.push({ date, licensePlate, amount, reason });
+    }
+
+    const result = writeoffs.createSeries(id, rows, {
+      id: user.id,
+      site: user.site,
+    });
+
+    if (result.ok) {
+      res.status(201).json({ created: result.created });
+      return;
+    }
+
+    switch (result.error) {
+      case "not_found":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "date":
+        res.status(400).json({ error: "date" });
+        return;
+      case "exceeds":
+        res.status(409).json({ error: "exceeds", balance: result.balance });
+        return;
+    }
+  },
+);
+
+// GET /api/gsm/lots/:id/history — auth.
+// worker: только партия его участка (иначе 404); manager: любая.
+gsmRouter.get(
+  "/api/gsm/lots/:id/history",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    const user = req.user!;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const result = lots.history(id);
+    if (!result) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    // Воркер видит только свою партию — чужой участок маскируем под 404.
+    if (user.role === "worker" && result.lot.site !== user.site) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    res.status(200).json({ lot: result.lot, events: result.events });
+  },
+);
+
+// GET /api/gsm/employees — manager. Все воркеры (активные + архивные).
+// active:false — архивные, фронт показывает их замьюченными с кнопкой «Восстановить».
+gsmRouter.get(
+  "/api/gsm/employees",
+  requireAuth,
+  requireManager,
+  (_req: Request, res: Response): void => {
+    const workers = users.listWorkers();
+    const employees = workers.map((w) => ({
+      id: w.id,
+      username: w.username,
+      displayName: w.displayName,
+      site: w.site,
+      active: w.active,
+    }));
+    res.status(200).json({ employees });
+  },
+);
+
+// POST /api/gsm/employees — manager. Роль форсится 'worker' (любой role из тела игнорируем).
+// Тело: {username,password,displayName,site}. site∈LOTS; пароль≥6.
+gsmRouter.post(
+  "/api/gsm/employees",
+  requireAuth,
+  requireManager,
+  async (req: Request, res: Response): Promise<void> => {
+    const body = (req.body ?? {}) as {
+      username?: unknown;
+      password?: unknown;
+      displayName?: unknown;
+      site?: unknown;
+    };
+
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const site = typeof body.site === "string" ? body.site.trim() : "";
+    const displayNameRaw =
+      typeof body.displayName === "string" ? body.displayName.trim() : "";
+    const displayName = displayNameRaw ? displayNameRaw : null;
+
+    if (!username) {
+      res.status(400).json({ error: "invalid_username" });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ error: "weak_password" });
+      return;
+    }
+    if (!VALID_SITES.has(site)) {
+      res.status(400).json({ error: "invalid_site" });
+      return;
+    }
+
+    const result = await users.createOrReactivateWorker({
+      username,
+      password,
+      displayName,
+      site,
+      createdBy: req.user!.id,
+    });
+
+    if ("conflict" in result) {
+      res.status(409).json({ error: "username_taken" });
+      return;
+    }
+
+    res.status(201).json({ id: result.id });
+  },
+);
+
+// DELETE /api/gsm/employees/:id — manager. Мягкое удаление (is_active=0), только worker.
+gsmRouter.delete(
+  "/api/gsm/employees/:id",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const ok = users.softDeleteWorker(id);
+    if (!ok) {
+      // Не воркер / не найден / уже удалён → 404.
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    res.status(204).end();
+  },
+);
+
+// POST /api/gsm/employees/:id/restore — manager. Восстановление из архива (is_active=1), только worker.
+gsmRouter.post(
+  "/api/gsm/employees/:id/restore",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const ok = users.restoreWorker(id);
+    if (!ok) {
+      // Не воркер / не найден → 404.
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    res.status(204).end();
+  },
+);

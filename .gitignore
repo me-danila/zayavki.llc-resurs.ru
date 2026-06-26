@@ -6,3 +6,10 @@ tmp/
 
 # креды — НЕ коммитим (см. env.example как шаблон)
 .env
+
+# локальные настройки Claude Code (личные)
+.claude/settings.local.json
+
+# БД ГСМ-товароучёта — данные не коммитим, но папку сохраняем
+server/data/*
+!server/data/.gitkeep

@@ -8,6 +8,7 @@
     "build": "vite build",
     "start": "bun server/index.ts",
     "dev": "bun --watch server/index.ts",
+    "seed": "bun server/seed.ts",
     "lint": "eslint ."
   },
   "dependencies": {
