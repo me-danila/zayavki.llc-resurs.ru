@@ -45,14 +45,15 @@ async function sendMessage(text: string, fileToken: string): Promise<void> {
     attachments: [{ type: "file", payload: { token: fileToken } }],
   };
 
-  // MAX обрабатывает файл асинхронно — ждём перед первой попыткой
-  await sleep(5000);
+  // MAX обрабатывает файл асинхронно — нет сигнала "готово".
+  // Пробуем сразу, при неудаче ретраим с нарастающей паузой (backoff),
+  // пока не пройдёт. Часто файл готов быстрее фиксированных 5с.
+  const backoff = [0, 500, 1000, 2000, 3000, 4000]; // мс перед каждой попыткой
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    if (attempt > 1) {
-      const delay = attempt * 2000;
-      console.log(`[max] retry ${attempt} after ${delay}ms...`);
-      await sleep(delay);
+  for (let attempt = 0; attempt < backoff.length; attempt++) {
+    if (backoff[attempt] > 0) {
+      console.log(`[max] retry ${attempt + 1} after ${backoff[attempt]}ms...`);
+      await sleep(backoff[attempt]);
     }
 
     const res = await fetch(`${BASE_URL}/messages?chat_id=${CHAT_ID}`, {
@@ -62,15 +63,15 @@ async function sendMessage(text: string, fileToken: string): Promise<void> {
     });
 
     if (res.ok) {
-      console.log("[max] message sent successfully");
+      console.log(`[max] message sent successfully (попытка ${attempt + 1})`);
       return;
     }
 
     const errBody = await res.text();
-    console.error(`[max] sendMessage attempt ${attempt} failed: ${res.status}`, errBody);
+    console.error(`[max] sendMessage attempt ${attempt + 1} failed: ${res.status}`, errBody);
 
-    if (attempt === 3) {
-      throw new Error(`[max] sendMessage failed after 3 attempts: ${res.status} ${errBody}`);
+    if (attempt === backoff.length - 1) {
+      throw new Error(`[max] sendMessage failed after ${backoff.length} attempts: ${res.status} ${errBody}`);
     }
   }
 }

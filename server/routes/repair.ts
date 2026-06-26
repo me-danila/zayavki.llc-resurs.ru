@@ -15,13 +15,19 @@ repairRouter.post("/repair", async (req: Request, res: Response) => {
     return;
   }
 
-  const xlsxPath = await createXlsx(payload);
+  // Отвечаем сразу — пользователь не ждёт загрузку в MAX
+  res.status(202).json({ ok: true, file: `Заявка ${payload.requestNo}.xlsx` });
 
-  try {
-    await sendToMax(xlsxPath, payload.requestNo);
-  } finally {
-    deleteXlsx(xlsxPath);
-  }
-
-  res.status(200).json({ ok: true, file: `Заявка ${payload.requestNo}.xlsx` });
+  // Генерация xlsx + отправка в MAX идут в фоне
+  void (async () => {
+    let xlsxPath: string | undefined;
+    try {
+      xlsxPath = await createXlsx(payload);
+      await sendToMax(xlsxPath, payload.requestNo);
+    } catch (err) {
+      console.error(`[webhook] фоновая обработка заявки ${payload.requestNo} упала:`, err);
+    } finally {
+      if (xlsxPath) deleteXlsx(xlsxPath);
+    }
+  })();
 });
