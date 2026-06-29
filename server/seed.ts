@@ -1,32 +1,22 @@
-// Сид пользователей: менеджеры + стартовые воркеры.
-// Пароли НЕ хардкодим в коде — берём из process.env. Дефолт допустим только для локалки
-// (с явным предупреждением). Печатаем созданные логины БЕЗ паролей.
+// Сид пользователей: менеджеры + воркеры. Пароли НЕ хардкодим — только из env.
+// Никаких встроенных дефолтных логинов/паролей: если env не задан, сид ничего не создаёт.
+// Печатаем созданные логины БЕЗ паролей.
 //
 // Запуск:  bun run seed   (или  bun server/seed.ts)
 //
 // ── Конфигурация через env ───────────────────────────────────────────────────
 // GSM_SEED_MANAGERS — список менеджеров, формат: "username:password:displayName"
-//                     через запятую. Пароль/displayName опциональны
-//                     (пароль берётся из GSM_SEED_MANAGER_PASSWORD, иначе дефолт-локалка).
+//                     через запятую. Пароль можно не указывать в строке, если задан
+//                     GSM_SEED_MANAGER_PASSWORD. displayName опционален.
 // GSM_SEED_WORKERS  — список воркеров,   формат: "username:password:site:displayName"
-//                     через запятую. Пароль опционален (см. GSM_SEED_WORKER_PASSWORD).
-// GSM_SEED_MANAGER_PASSWORD / GSM_SEED_WORKER_PASSWORD — дефолтный пароль для строк,
+//                     через запятую. Пароль — в строке или GSM_SEED_WORKER_PASSWORD.
+// GSM_SEED_MANAGER_PASSWORD / GSM_SEED_WORKER_PASSWORD — пароль по умолчанию для строк,
 //                     где он не указан явно.
 //
-// Если env не заданы — используется встроенный список логинов с локальным дефолт-паролем
-// (с предупреждением). Пароли в коде НЕ хранятся.
+// Если для записи нет пароля (ни в строке, ни в env) — запись ПРОПУСКАЕТСЯ с предупреждением.
 
 import "dotenv/config";
 import { db } from "./db";
-
-const LOCAL_DEFAULT_PASSWORD = "changeme123";
-
-// Встроенный список логинов на случай отсутствия env (только логины, без паролей!).
-const FALLBACK_MANAGERS = ["manager"];
-const FALLBACK_WORKERS: Array<{ username: string; site: string }> = [
-  { username: "nyagan", site: "Нягань" },
-  { username: "muravlenko", site: "Муравленко" },
-];
 
 type ManagerSeed = { username: string; password: string; displayName: string | null };
 type WorkerSeed = {
@@ -36,81 +26,74 @@ type WorkerSeed = {
   displayName: string | null;
 };
 
-let usedLocalDefault = false;
+const skippedNoPassword: string[] = [];
 
-function managerPasswordFallback(): string {
+function managerPassword(explicit: string | undefined): string | null {
+  if (explicit && explicit.trim()) return explicit;
   const env = process.env.GSM_SEED_MANAGER_PASSWORD;
   if (env && env.trim()) return env;
-  usedLocalDefault = true;
-  return LOCAL_DEFAULT_PASSWORD;
+  return null;
 }
 
-function workerPasswordFallback(): string {
+function workerPassword(explicit: string | undefined): string | null {
+  if (explicit && explicit.trim()) return explicit;
   const env = process.env.GSM_SEED_WORKER_PASSWORD;
   if (env && env.trim()) return env;
-  usedLocalDefault = true;
-  return LOCAL_DEFAULT_PASSWORD;
+  return null;
 }
 
-// Парсинг "a:b:c" с учётом опциональных хвостов. Пустые сегменты → undefined.
+// Парсинг "a:b:c" с учётом опциональных хвостов.
 function parts(spec: string): string[] {
   return spec.split(":").map((s) => s.trim());
 }
 
 function parseManagers(): ManagerSeed[] {
   const raw = process.env.GSM_SEED_MANAGERS;
-  if (raw && raw.trim()) {
-    return raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((spec) => {
-        const [username, password, displayName] = parts(spec);
-        return {
-          username,
-          password: password || managerPasswordFallback(),
-          displayName: displayName || null,
-        };
-      })
-      .filter((m) => m.username);
-  }
-  // Fallback: встроенные логины + дефолт-пароль.
-  return FALLBACK_MANAGERS.map((username) => ({
-    username,
-    password: managerPasswordFallback(),
-    displayName: null,
-  }));
+  if (!raw || !raw.trim()) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((spec) => {
+      const [username, password, displayName] = parts(spec);
+      return { username, password, displayName: displayName || null };
+    })
+    .filter((m) => m.username)
+    .map((m) => {
+      const password = managerPassword(m.password);
+      if (!password) {
+        skippedNoPassword.push(`${m.username} (менеджер)`);
+        return null;
+      }
+      return { username: m.username, password, displayName: m.displayName };
+    })
+    .filter((m): m is ManagerSeed => m !== null);
 }
 
 function parseWorkers(): WorkerSeed[] {
   const raw = process.env.GSM_SEED_WORKERS;
-  if (raw && raw.trim()) {
-    return raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((spec) => {
-        const [username, password, site, displayName] = parts(spec);
-        return {
-          username,
-          password: password || workerPasswordFallback(),
-          site,
-          displayName: displayName || null,
-        };
-      })
-      .filter((w) => w.username && w.site);
-  }
-  // Fallback: встроенные логины+участки + дефолт-пароль.
-  return FALLBACK_WORKERS.map(({ username, site }) => ({
-    username,
-    password: workerPasswordFallback(),
-    site,
-    displayName: null,
-  }));
+  if (!raw || !raw.trim()) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((spec) => {
+      const [username, password, site, displayName] = parts(spec);
+      return { username, password, site, displayName: displayName || null };
+    })
+    .filter((w) => w.username && w.site)
+    .map((w) => {
+      const password = workerPassword(w.password);
+      if (!password) {
+        skippedNoPassword.push(`${w.username} (воркер)`);
+        return null;
+      }
+      return { username: w.username, password, site: w.site, displayName: w.displayName };
+    })
+    .filter((w): w is WorkerSeed => w !== null);
 }
 
 // INSERT с ON CONFLICT(username) DO NOTHING — повторный сид не трогает существующих.
-// Возвращает id вставленной строки либо null (конфликт → ничего не вставлено).
 async function insertManager(m: ManagerSeed): Promise<number | null> {
   const hash = await Bun.password.hash(m.password);
   const row = db
@@ -158,13 +141,12 @@ async function main() {
     else skippedWorkers.push(`${w.username} (${w.site})`);
   }
 
-  // ── Печать итогов БЕЗ паролей ──────────────────────────────────────────────
   console.log("=== Сид пользователей ГСМ ===");
-  if (usedLocalDefault) {
+
+  if (!managers.length && !workers.length && !skippedNoPassword.length) {
     console.warn(
-      "[seed] ВНИМАНИЕ: использован локальный дефолт-пароль для части пользователей. " +
-        "Для прода задайте GSM_SEED_MANAGER_PASSWORD / GSM_SEED_WORKER_PASSWORD " +
-        "(или пароли прямо в GSM_SEED_MANAGERS/GSM_SEED_WORKERS).",
+      "[seed] Нечего сеять: задайте GSM_SEED_MANAGERS / GSM_SEED_WORKERS в env. " +
+        "Встроенных дефолтных пользователей больше нет.",
     );
   }
 
@@ -179,6 +161,13 @@ async function main() {
   );
   if (createdWorkers.length) console.log("  + " + createdWorkers.join(", "));
   if (skippedWorkers.length) console.log("  = " + skippedWorkers.join(", "));
+
+  if (skippedNoPassword.length) {
+    console.warn(
+      "[seed] Пропущены без пароля (нет ни в строке, ни в GSM_SEED_*_PASSWORD): " +
+        skippedNoPassword.join(", "),
+    );
+  }
 
   console.log("=== Готово ===");
 }
