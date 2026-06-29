@@ -130,6 +130,21 @@ const TransferForm: React.FC<TransferFormProps> = ({
 
       <div className="bg-white p-5 rounded-lg border border-gray-200">
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-5">
+          {/* Дата — первой ячейкой */}
+          <div className="sm:col-span-2">
+            <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
+              Дата
+            </label>
+            <input
+              type="date"
+              min={lot.receivedDate}
+              max={todayMsk()}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="resource-input text-sm"
+            />
+          </div>
+
           {/* Целевой участок */}
           <div className="sm:col-span-5">
             <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
@@ -173,21 +188,6 @@ const TransferForm: React.FC<TransferFormProps> = ({
               className={`resource-input text-sm bg-gray-50 ${
                 overBalance ? 'text-red-500 font-bold' : 'text-gray-500'
               }`}
-            />
-          </div>
-
-          {/* Дата */}
-          <div className="sm:col-span-2">
-            <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
-              Дата
-            </label>
-            <input
-              type="date"
-              min={lot.receivedDate}
-              max={todayMsk()}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="resource-input text-sm"
             />
           </div>
         </div>
