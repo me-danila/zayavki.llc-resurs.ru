@@ -27,6 +27,7 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
   const [showEmployeeForm, setShowEmployeeForm] = React.useState(false);
   const [employeesOpen, setEmployeesOpen] = React.useState(false);
   const [sitesOpen, setSitesOpen] = React.useState(false);
+  const [showSiteForm, setShowSiteForm] = React.useState(false);
   // Активные участки — опции для форм прихода и сотрудника. SiteAdmin сам ведёт
   // полный список (включая архив); сюда подгружаем только активные.
   const [activeSites, setActiveSites] = React.useState<Site[]>([]);
@@ -90,11 +91,16 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
           right={
             <button
               type="button"
-              onClick={() => setSitesOpen((v) => !v)}
-              aria-pressed={sitesOpen}
-              title={sitesOpen ? 'Свернуть' : 'Управление участками'}
+              onClick={() => {
+                const next = !showSiteForm;
+                setShowSiteForm(next);
+                // открытие формы добавления должно и раскрыть секцию
+                if (next) setSitesOpen(true);
+              }}
+              aria-pressed={showSiteForm}
+              title={showSiteForm ? 'Скрыть форму' : 'Добавить участок'}
               className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-                sitesOpen
+                showSiteForm
                   ? 'border-gray-900 bg-gray-900 text-white'
                   : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-900'
               }`}
@@ -103,7 +109,7 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
             </button>
           }
         >
-          <SiteAdmin onChanged={loadSites} />
+          <SiteAdmin onChanged={loadSites} showForm={showSiteForm} />
         </CollapsibleSection>
 
         {/* 4. Сотрудники участков — сворачиваемая секция с кнопкой-плюс */}

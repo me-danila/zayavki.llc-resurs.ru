@@ -21,6 +21,9 @@ export interface SiteAdminProps {
   // Вызывается после любого успешного изменения участков (create/archive/restore),
   // чтобы родитель перезагрузил список активных участков для форм.
   onChanged?: () => void;
+  // Показывать форму создания участка. По умолчанию скрыта — список виден всегда,
+  // форма раскрывается кнопкой «+» в заголовке секции (родитель управляет).
+  showForm?: boolean;
 }
 
 // Текст причины отказа архивации по коду ошибки (тело 409 {error}).
@@ -34,7 +37,7 @@ function archiveReason(error: unknown): string {
   return 'Не удалось архивировать участок.';
 }
 
-const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged }) => {
+const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged, showForm = false }) => {
   const [sites, setSites] = React.useState<Site[] | null>(null);
   const [listError, setListError] = React.useState(false);
   const [busyId, setBusyId] = React.useState<number | null>(null);
@@ -131,7 +134,8 @@ const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged }) => {
 
   return (
     <div className="space-y-4">
-      {/* Форма создания */}
+      {/* Форма создания — только по «+» (showForm) */}
+      {showForm && (
       <form
         onSubmit={onCreate}
         className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3"
@@ -163,6 +167,7 @@ const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged }) => {
         </div>
         {formError && <p className="text-xs text-red-500">{formError}</p>}
       </form>
+      )}
 
       {/* Список участков */}
       <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-white">
