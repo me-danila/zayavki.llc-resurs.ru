@@ -2,7 +2,7 @@
 // JSON. Сессия живёт в httpOnly cookie gsm_sid, в JS её не видно.
 // На !ok бросаем ApiError с .status и распарсенным телом (.body).
 
-import type { User, Lot, HistoryEvent, Employee } from './gsmTypes';
+import type { User, Lot, HistoryEvent, Employee, Site } from './gsmTypes';
 
 const BASE = '/api/gsm';
 
@@ -81,6 +81,38 @@ export async function logout(): Promise<void> {
   await request<void>('/logout', { method: 'POST' });
 }
 
+// --- Sites (manager-only) ---
+
+// GET /sites → Site[]. Все участки: активные сверху, архивные ниже.
+export async function getSites(): Promise<Site[]> {
+  const { data } = await request<{ sites: Site[] }>('/sites');
+  return data.sites.map((s) => ({
+    id: s.id,
+    name: s.name,
+    active: Boolean(s.active),
+  }));
+}
+
+// POST /sites {name} → {id}. 400 {error:'invalid'} / 409 {error:'exists'} → ApiError.
+export async function createSite(name: string): Promise<{ id: number }> {
+  const { data } = await request<{ id: number }>('/sites', {
+    method: 'POST',
+    body: { name },
+  });
+  return data;
+}
+
+// POST /sites/:id/archive → 204. 404 / 409 {error:'has_stock'|'has_workers'} → ApiError
+// (тело в .body, error в .message — пробрасываем как есть, чтобы UI показал причину).
+export async function archiveSite(id: number): Promise<void> {
+  await request<void>(`/sites/${id}/archive`, { method: 'POST' });
+}
+
+// POST /sites/:id/restore → 204. Возврат архивного участка в активные (is_active=1).
+export async function restoreSite(id: number): Promise<void> {
+  await request<void>(`/sites/${id}/restore`, { method: 'POST' });
+}
+
 // --- Lots / inventory ---
 
 // GET /lots → Lot[]. Сервер сам фильтрует по роли/участку.
@@ -92,7 +124,7 @@ export async function getLots(): Promise<Lot[]> {
 // POST /receipts {rows} → {created}. manager-only (форсится сервером).
 export type ReceiptRowPayload = {
   receivedDate: string;
-  site: string;
+  siteId: number;
   name: string;
   code: string;
   unit: string;
@@ -158,7 +190,8 @@ export async function getEmployees(): Promise<Employee[]> {
     id: e.id,
     username: e.username,
     displayName: e.displayName,
-    site: e.site,
+    siteId: e.siteId,
+    siteName: e.siteName,
     active: Boolean(e.active),
   }));
 }
@@ -168,7 +201,7 @@ export async function createEmployee(input: {
   username: string;
   password: string;
   displayName: string;
-  site: string;
+  siteId: number;
 }): Promise<{ id: number }> {
   const { data } = await request<{ id: number }>('/employees', {
     method: 'POST',

@@ -7,7 +7,7 @@ import { isValidDate } from "../lib/dates";
 
 export type ReceiptInput = {
   receivedDate: string;
-  site: string;
+  siteId: number;
   name: string;
   code: string;
   unit?: string;
@@ -15,9 +15,9 @@ export type ReceiptInput = {
 };
 
 // Структурная валидация одной строки прихода.
-// Проверку site∈LOTS делает слой роутов (Этап 3) — здесь только формат/непустота/число.
+// Проверку активности siteId делает слой роутов — здесь только формат/непустота/число.
 function validateRow(r: ReceiptInput, qty: number): void {
-  if (!r.site || typeof r.site !== "string" || !r.site.trim()) {
+  if (typeof r.siteId !== "number" || !Number.isInteger(r.siteId) || r.siteId <= 0) {
     throw new Error("invalid_site");
   }
   if (!r.name || typeof r.name !== "string" || !r.name.trim()) {
@@ -45,8 +45,8 @@ export function createMany(
     throw new Error("empty_rows");
   }
 
-  const insert = db.query<null, [string, string, string, string, number, string, number]>(
-    `INSERT INTO receipts (site, name, code, unit, qty_initial, received_date, created_by)
+  const insert = db.query<null, [number, string, string, string, number, string, number]>(
+    `INSERT INTO receipts (site_id, name, code, unit, qty_initial, received_date, created_by)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
 
@@ -58,7 +58,7 @@ export function createMany(
       validateRow(r, qty);
       const unit = r.unit && r.unit.trim() ? r.unit.trim() : "л";
       insert.run(
-        r.site.trim(),
+        r.siteId,
         r.name.trim(),
         r.code.trim(),
         unit,

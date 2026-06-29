@@ -2,13 +2,22 @@
 
 export type Role = "manager" | "worker";
 
+// Управляемый участок (таблица sites). active = is_active=1.
+export type Site = {
+  id: number;
+  name: string;
+  active: boolean;
+};
+
 // Публичный тип пользователя (то, что отдаём наружу/кладём в сессию).
+// site заменён на siteId+siteName: NULL у менеджера, NOT NULL у воркера.
 export type User = {
   id: number;
   username: string;
   displayName: string | null;
   role: Role;
-  site: string | null;
+  siteId: number | null;
+  siteName: string | null;
 };
 
 // Элемент списка воркеров для админки менеджера (GET /api/gsm/employees).
@@ -17,7 +26,8 @@ export type WorkerListItem = {
   id: number;
   username: string;
   displayName: string | null;
-  site: string | null;
+  siteId: number | null;
+  siteName: string | null;
   active: boolean;
 };
 
@@ -27,7 +37,7 @@ export type UserRow = {
   username: string;
   password_hash: string;
   role: Role;
-  site: string | null;
+  site_id: number | null;
   display_name: string | null;
   is_active: number;
   created_at: string;
@@ -38,7 +48,8 @@ export type Lot = {
   id: number;
   name: string;
   code: string;
-  site: string;
+  siteId: number;
+  siteName: string;
   unit: string;
   initialQty: number;
   balance: number;
@@ -57,12 +68,15 @@ export type HistoryEvent = {
 };
 
 // Маппинг сырой строки users → публичный User.
-export function toUser(row: UserRow): User {
+// siteName приходит аргументом (JOIN на sites делает вызывающий слой):
+// null у менеджера (site_id IS NULL), имя участка у воркера.
+export function toUser(row: UserRow, siteName: string | null): User {
   return {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
     role: row.role,
-    site: row.site,
+    siteId: row.site_id,
+    siteName,
   };
 }

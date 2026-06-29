@@ -22,13 +22,14 @@ import {
 import * as api from '../../lib/gsmApi';
 import { ApiError } from '../../lib/gsmApi';
 import type { Employee } from '../../lib/gsmTypes';
-import { LOTS } from '../../data/lotData';
 import { Combobox } from '../ui/Combobox';
 import { translitLogin } from '../../lib/translit';
 import { genPassword } from '../../lib/genPassword';
 
 export interface EmployeeAdminProps {
   showForm: boolean;
+  // Активные участки — опции комбобокса и источник для name→siteId.
+  sites: Array<{ id: number; name: string }>;
 }
 
 // Инкремент числового суффикса логина при коллизии: ivanov-p → ivanov-p2 → ivanov-p3.
@@ -42,7 +43,7 @@ function nextLogin(login: string): string {
   return `${login}2`;
 }
 
-const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm }) => {
+const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm, sites }) => {
   const [employees, setEmployees] = React.useState<Employee[] | null>(null);
   const [listError, setListError] = React.useState(false);
   const [busyId, setBusyId] = React.useState<number | null>(null);
@@ -59,6 +60,14 @@ const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm }) => {
 
   // Логин derive из ФИО (live).
   const login = React.useMemo(() => translitLogin(fio), [fio]);
+
+  // Опции комбобокса участка + маппинг имя→siteId (по активным участкам).
+  const siteOptions = React.useMemo(() => sites.map((s) => s.name), [sites]);
+  const siteIdByName = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of sites) m.set(s.name.trim(), s.id);
+    return m;
+  }, [sites]);
 
   const refetch = React.useCallback(async () => {
     setListError(false);
@@ -106,8 +115,9 @@ const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm }) => {
       setFormError('Введите ФИО.');
       return;
     }
-    if (!site) {
-      setFormError('Выберите участок.');
+    const siteId = siteIdByName.get(site.trim());
+    if (!site || siteId === undefined) {
+      setFormError('Выберите участок из списка.');
       return;
     }
 
@@ -120,7 +130,7 @@ const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm }) => {
             username: candidate,
             password,
             displayName: trimmedFio,
-            site,
+            siteId,
           });
           setOkMessage(`✓ добавлен: ${candidate}`);
           resetForm();
@@ -212,7 +222,7 @@ const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm }) => {
             <div className="flex-1 min-w-[150px]">
               <label className="resource-label">Участок</label>
               <Combobox
-                options={LOTS}
+                options={siteOptions}
                 value={site}
                 onChange={setSite}
                 placeholder="Выбор участка..."
@@ -331,7 +341,7 @@ const EmployeeAdmin: React.FC<EmployeeAdminProps> = ({ showForm }) => {
                   логин: {e.username}
                 </div>
                 <div className="text-[11px] text-gray-500">
-                  Участок: {e.site ?? '—'}
+                  Участок: {e.siteName ?? '—'}
                 </div>
               </div>
 

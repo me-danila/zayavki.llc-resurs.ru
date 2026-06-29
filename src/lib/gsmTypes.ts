@@ -3,19 +3,28 @@
 
 export type Role = 'manager' | 'worker';
 
+// Управляемый участок (раньше был статичный LOTS). active=false → архивный (is_active=0).
+export type Site = {
+  id: number;
+  name: string;
+  active: boolean;
+};
+
 export type User = {
   id: number;
   username: string;
   displayName: string | null;
   role: Role;
-  site: string | null;
+  siteId: number | null;
+  siteName: string | null;
 };
 
 export type Lot = {
   id: number;
   name: string;
   code: string;
-  site: string;
+  siteId: number;
+  siteName: string;
   unit: string;
   initialQty: number;
   balance: number;
@@ -40,6 +49,7 @@ export type Employee = {
   id: number;
   username: string;
   displayName: string | null;
-  site: string | null;
+  siteId: number | null;
+  siteName: string | null;
   active: boolean;
 };

@@ -1,8 +1,9 @@
 // Форма прихода (manager). useForm + zodResolver(ReceiptSchema), FormProvider,
 // useFieldArray name='rows' (старт [EMPTY_RECEIPT_ROW]). Рендерит ReceiptRow.
-// onSubmit → маппинг полей формы (date/siteName) → payload контракта §4
-// (receivedDate/site) → createReceipts(rows). Успех → reset к одной пустой строке + onSaved().
-// Ошибки 400 — inline-баннер (alert-зона над футером).
+// onSubmit → маппинг полей формы (date→receivedDate, siteName→siteId через список
+// активных участков sites) → payload контракта §4 → createReceipts(rows).
+// Если участок строки не нашёлся среди активных — inline-ошибка (без запроса).
+// Успех → reset к одной пустой строке + onSaved(). Ошибки 400 — inline-баннер.
 
 import React from 'react';
 import { useForm, FormProvider, useFieldArray } from 'react-hook-form';
@@ -34,9 +35,11 @@ import { ReceiptRow } from './ReceiptRow';
 export interface ReceiptFormProps {
   // Вызывается после успешного сохранения прихода (менеджер рефетчит партии).
   onSaved: () => void;
+  // Активные участки — опции комбобокса участка и источник для name→siteId.
+  sites: Array<{ id: number; name: string }>;
 }
 
-const ReceiptForm: React.FC<ReceiptFormProps> = ({ onSaved }) => {
+const ReceiptForm: React.FC<ReceiptFormProps> = ({ onSaved, sites }) => {
   const [formError, setFormError] = React.useState<string | null>(null);
   const [okMessage, setOkMessage] = React.useState<string | null>(null);
 
@@ -58,18 +61,34 @@ const ReceiptForm: React.FC<ReceiptFormProps> = ({ onSaved }) => {
 
   const { fields, append, remove } = useFieldArray({ control, name: 'rows' });
 
+  // Имя участка → siteId (по активным участкам). Сравнение по trim, регистр учитываем
+  // как есть — комбобокс отдаёт ровно выбранное имя из списка.
+  const siteIdByName = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of sites) m.set(s.name.trim(), s.id);
+    return m;
+  }, [sites]);
+
   const onSubmit = async (data: ReceiptData) => {
     setFormError(null);
     setOkMessage(null);
-    // Маппинг формы → контракт §4: date→receivedDate, siteName→site.
-    const rows: ReceiptRowPayload[] = data.rows.map((r) => ({
-      receivedDate: r.date,
-      site: r.siteName,
-      name: r.name,
-      code: r.code,
-      unit: r.unit,
-      quantity: r.quantity,
-    }));
+    // Маппинг формы → контракт §4: date→receivedDate, siteName→siteId.
+    const rows: ReceiptRowPayload[] = [];
+    for (const r of data.rows) {
+      const siteId = siteIdByName.get(r.siteName.trim());
+      if (siteId === undefined) {
+        setFormError('Выберите участок из списка для каждой позиции.');
+        return;
+      }
+      rows.push({
+        receivedDate: r.date,
+        siteId,
+        name: r.name,
+        code: r.code,
+        unit: r.unit,
+        quantity: r.quantity,
+      });
+    }
 
     try {
       const { created } = await api.createReceipts(rows);
@@ -100,6 +119,7 @@ const ReceiptForm: React.FC<ReceiptFormProps> = ({ onSaved }) => {
               index={index}
               canRemove={fields.length > 1}
               onRemove={() => remove(index)}
+              sites={sites}
             />
           ))}
           {errors.rows?.root && (

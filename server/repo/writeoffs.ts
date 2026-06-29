@@ -19,7 +19,7 @@ export type CreateSeriesResult =
   | { ok: false; error: "exceeds"; balance: number };
 
 // Создать серию списаний по партии receiptId.
-// worker: { id, site } — из сессии (доверяем только серверу).
+// worker: { id, siteId } — из сессии (доверяем только серверу).
 // Правила:
 //  - партии нет / партия другого участка → not_found (404, не раскрываем существование)
 //  - дата каждой строки: received_date ≤ date ≤ todayMsk(), формат YYYY-MM-DD → иначе 'date'
@@ -27,7 +27,7 @@ export type CreateSeriesResult =
 export function createSeries(
   receiptId: number,
   rows: WriteOffInput[],
-  worker: { id: number; site: string },
+  worker: { id: number; siteId: number },
 ): CreateSeriesResult {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { ok: false, error: "date" };
@@ -39,11 +39,11 @@ export function createSeries(
     // Партия + текущий остаток внутри транзакции (консистентный снимок).
     const lot = db
       .query<
-        { site: string; received_date: string; balance: number },
+        { site_id: number; received_date: string; balance: number },
         [number]
       >(
         `SELECT
-           r.site          AS site,
+           r.site_id       AS site_id,
            r.received_date AS received_date,
            r.qty_initial - COALESCE((
              SELECT SUM(w.qty) FROM writeoffs w WHERE w.receipt_id = r.id
@@ -54,7 +54,7 @@ export function createSeries(
       .get(receiptId);
 
     // Нет партии или чужой участок → одинаково not_found (не раскрываем).
-    if (!lot || lot.site !== worker.site) {
+    if (!lot || lot.site_id !== worker.siteId) {
       db.exec("ROLLBACK");
       return { ok: false, error: "not_found" };
     }

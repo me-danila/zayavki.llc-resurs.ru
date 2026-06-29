@@ -16,7 +16,7 @@ export interface GsmHeaderProps {
 const GsmHeader: React.FC<GsmHeaderProps> = ({ user, onLogout }) => {
   const name = user.displayName || user.username;
   const subtitle =
-    user.role === 'manager' ? 'Менеджер' : user.site ?? 'участок';
+    user.role === 'manager' ? 'Менеджер' : user.siteName ?? 'участок';
 
   return (
     <header className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-2.5">

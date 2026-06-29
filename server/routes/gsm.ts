@@ -6,17 +6,14 @@
 
 import { Router, type Request, type Response } from "express";
 import { requireAuth, requireManager } from "../auth/middleware";
-import { LOTS } from "../../src/data/lotData";
 import * as lots from "../repo/lots";
 import * as receipts from "../repo/receipts";
 import * as writeoffs from "../repo/writeoffs";
 import * as users from "../repo/users";
+import * as sites from "../repo/sites";
 import { isValidDate } from "../lib/dates";
 
 export const gsmRouter = Router();
-
-// Допустимые участки — имена строкой из LOTS (src/data/lotData.tsx). siteId нет.
-const VALID_SITES = new Set<string>(LOTS);
 
 // Парсинг :id в положительное целое. NaN/<=0 → null (трактуем как not_found).
 function parseId(raw: string): number | null {
@@ -25,8 +22,95 @@ function parseId(raw: string): number | null {
   return id;
 }
 
+// GET /api/gsm/sites — manager. Все участки (активные сверху + архивные).
+gsmRouter.get(
+  "/api/gsm/sites",
+  requireAuth,
+  requireManager,
+  (_req: Request, res: Response): void => {
+    res.status(200).json({ sites: sites.list({ includeArchived: true }) });
+  },
+);
+
+// POST /api/gsm/sites — manager. Создание участка. {name} → 201 {id}.
+// Пустое/непстрока → 400 invalid; дубликат NOCASE → 409 exists.
+gsmRouter.post(
+  "/api/gsm/sites",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const body = (req.body ?? {}) as { name?: unknown };
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = sites.create(name, req.user!.id);
+    if ("conflict" in result) {
+      res.status(409).json({ error: "exists" });
+      return;
+    }
+    res.status(201).json({ id: result.id });
+  },
+);
+
+// POST /api/gsm/sites/:id/archive — manager. Архивирование (is_active=0).
+// not_found → 404; активный воркер → 409 has_workers; остаток>EPS → 409 has_stock.
+gsmRouter.post(
+  "/api/gsm/sites/:id/archive",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const result = sites.archive(id);
+    if (result.ok) {
+      res.status(204).end();
+      return;
+    }
+
+    switch (result.reason) {
+      case "not_found":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "has_workers":
+        res.status(409).json({ error: "has_workers" });
+        return;
+      case "has_stock":
+        res.status(409).json({ error: "has_stock" });
+        return;
+    }
+  },
+);
+
+// POST /api/gsm/sites/:id/restore — manager. Восстановление из архива (is_active=1).
+gsmRouter.post(
+  "/api/gsm/sites/:id/restore",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const ok = sites.restore(id);
+    if (!ok) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
 // GET /api/gsm/lots — auth.
-// manager: все партии; worker: сервер фильтрует по session.site (query игнорируем).
+// manager: все партии; worker: сервер фильтрует по session.siteId (query игнорируем).
 gsmRouter.get(
   "/api/gsm/lots",
   requireAuth,
@@ -35,13 +119,13 @@ gsmRouter.get(
     const list =
       user.role === "manager"
         ? lots.list({})
-        : lots.list({ site: user.site ?? "" });
+        : lots.list({ siteId: user.siteId ?? 0 });
     res.status(200).json({ lots: list });
   },
 );
 
 // POST /api/gsm/receipts — manager. Мульти-приход одной транзакцией.
-// Тело: {rows:[{receivedDate,site,name,code,unit?,quantity}]}.
+// Тело: {rows:[{receivedDate,siteId,name,code,unit?,quantity}]}.
 gsmRouter.post(
   "/api/gsm/receipts",
   requireAuth,
@@ -64,14 +148,15 @@ gsmRouter.post(
       }
       const r = raw as {
         receivedDate?: unknown;
-        site?: unknown;
+        siteId?: unknown;
         name?: unknown;
         code?: unknown;
         unit?: unknown;
         quantity?: unknown;
       };
 
-      const site = typeof r.site === "string" ? r.site.trim() : "";
+      const siteId =
+        typeof r.siteId === "number" ? r.siteId : Number(r.siteId);
       const name = typeof r.name === "string" ? r.name.trim() : "";
       const code = typeof r.code === "string" ? r.code.trim() : "";
       const receivedDate =
@@ -81,7 +166,8 @@ gsmRouter.post(
       const quantity =
         typeof r.quantity === "number" ? r.quantity : Number(r.quantity);
 
-      if (!VALID_SITES.has(site)) {
+      // siteId должен быть существующим АКТИВНЫМ участком.
+      if (!Number.isInteger(siteId) || siteId <= 0 || !sites.isActive(siteId)) {
         res.status(400).json({ error: "invalid_site" });
         return;
       }
@@ -102,7 +188,7 @@ gsmRouter.post(
         return;
       }
 
-      parsed.push({ receivedDate, site, name, code, unit, quantity });
+      parsed.push({ receivedDate, siteId, name, code, unit, quantity });
     }
 
     try {
@@ -124,7 +210,7 @@ gsmRouter.post(
   (req: Request, res: Response): void => {
     const user = req.user!;
     // Списание — только воркер своего участка. Менеджер → 403 (не worker).
-    if (user.role !== "worker" || !user.site) {
+    if (user.role !== "worker" || user.siteId == null) {
       res.status(403).json({ error: "forbidden" });
       return;
     }
@@ -165,7 +251,7 @@ gsmRouter.post(
 
     const result = writeoffs.createSeries(id, rows, {
       id: user.id,
-      site: user.site,
+      siteId: user.siteId,
     });
 
     if (result.ok) {
@@ -207,7 +293,7 @@ gsmRouter.get(
     }
 
     // Воркер видит только свою партию — чужой участок маскируем под 404.
-    if (user.role === "worker" && result.lot.site !== user.site) {
+    if (user.role === "worker" && result.lot.siteId !== user.siteId) {
       res.status(404).json({ error: "not_found" });
       return;
     }
@@ -228,7 +314,8 @@ gsmRouter.get(
       id: w.id,
       username: w.username,
       displayName: w.displayName,
-      site: w.site,
+      siteId: w.siteId,
+      siteName: w.siteName,
       active: w.active,
     }));
     res.status(200).json({ employees });
@@ -236,7 +323,7 @@ gsmRouter.get(
 );
 
 // POST /api/gsm/employees — manager. Роль форсится 'worker' (любой role из тела игнорируем).
-// Тело: {username,password,displayName,site}. site∈LOTS; пароль≥6.
+// Тело: {username,password,displayName,siteId}. siteId — активный участок; пароль≥6.
 gsmRouter.post(
   "/api/gsm/employees",
   requireAuth,
@@ -246,12 +333,13 @@ gsmRouter.post(
       username?: unknown;
       password?: unknown;
       displayName?: unknown;
-      site?: unknown;
+      siteId?: unknown;
     };
 
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
-    const site = typeof body.site === "string" ? body.site.trim() : "";
+    const siteId =
+      typeof body.siteId === "number" ? body.siteId : Number(body.siteId);
     const displayNameRaw =
       typeof body.displayName === "string" ? body.displayName.trim() : "";
     const displayName = displayNameRaw ? displayNameRaw : null;
@@ -264,7 +352,7 @@ gsmRouter.post(
       res.status(400).json({ error: "weak_password" });
       return;
     }
-    if (!VALID_SITES.has(site)) {
+    if (!Number.isInteger(siteId) || siteId <= 0 || !sites.isActive(siteId)) {
       res.status(400).json({ error: "invalid_site" });
       return;
     }
@@ -273,7 +361,7 @@ gsmRouter.post(
       username,
       password,
       displayName,
-      site,
+      siteId,
       createdBy: req.user!.id,
     });
 

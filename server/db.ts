@@ -20,20 +20,40 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
-const DDL = `
+// Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
+const DEFAULT_SITES = [
+  "Нягань",
+  "Муравленко",
+  "Харампур",
+  "Барсуки",
+  "ЮНГ",
+  "Офис",
+];
+
+// Базовая схема для СВЕЖИХ БД (актуальная, с site_id-FK). На существующих v1-БД
+// CREATE ... IF NOT EXISTS — no-op, такие БД доводит миграция migrateToV2().
+const BASE_DDL = `
+CREATE TABLE IF NOT EXISTS sites (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('manager','worker')),
-  site          TEXT,
+  site_id       INTEGER REFERENCES sites(id),
   display_name  TEXT,
   is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   created_by    INTEGER REFERENCES users(id),
-  CHECK ((role='manager' AND site IS NULL) OR (role='worker' AND site IS NOT NULL))
+  CHECK ((role='manager' AND site_id IS NULL) OR (role='worker' AND site_id IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -46,14 +66,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS receipts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  site          TEXT NOT NULL,
+  site_id       INTEGER NOT NULL REFERENCES sites(id),
   name          TEXT NOT NULL,
   code          TEXT NOT NULL,
   unit          TEXT NOT NULL DEFAULT 'л',
   qty_initial   REAL NOT NULL CHECK (qty_initial > 0),
-  -- Канон §2 даёт GLOB '____-__-__', но в SQLite GLOB '_' — литерал, а не wildcard,
-  -- из-за чего шаблон отвергает любую реальную дату. Эквивалент по интенту (день YYYY-MM-DD,
-  -- только цифры) — классы [0-9]. См. issues этапа 0.
+  -- Канон §2 даёт GLOB '____-__-__', но в SQLite GLOB '_' — литерал, а не wildcard.
+  -- Эквивалент по интенту (день YYYY-MM-DD, только цифры) — классы [0-9].
   received_date TEXT NOT NULL CHECK (received_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   created_by    INTEGER NOT NULL REFERENCES users(id),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -63,20 +82,22 @@ CREATE TABLE IF NOT EXISTS writeoffs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   receipt_id    INTEGER NOT NULL REFERENCES receipts(id),
   qty           REAL NOT NULL CHECK (qty > 0),
-  -- См. комментарий к receipts.received_date: GLOB-классы вместо нерабочего '____-__-__'.
   writeoff_date TEXT NOT NULL CHECK (writeoff_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   license_plate TEXT NOT NULL,
   reason        TEXT NOT NULL,
   created_by    INTEGER NOT NULL REFERENCES users(id),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+`;
 
-CREATE INDEX IF NOT EXISTS idx_users_site       ON users(site) WHERE site IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_sessions_user    ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_receipts_site    ON receipts(site);
-CREATE INDEX IF NOT EXISTS idx_receipts_cby     ON receipts(created_by);
-CREATE INDEX IF NOT EXISTS idx_writeoffs_recpt  ON writeoffs(receipt_id);
-CREATE INDEX IF NOT EXISTS idx_writeoffs_cby    ON writeoffs(created_by);
+// Индексы и триггеры — создаём ПОСЛЕ возможной миграции (rebuild дропает их вместе с таблицами).
+const INDEXES_TRIGGERS_DDL = `
+CREATE INDEX IF NOT EXISTS idx_users_site_id     ON users(site_id) WHERE site_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sessions_user     ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_site_id  ON receipts(site_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_cby      ON receipts(created_by);
+CREATE INDEX IF NOT EXISTS idx_writeoffs_recpt   ON writeoffs(receipt_id);
+CREATE INDEX IF NOT EXISTS idx_writeoffs_cby     ON writeoffs(created_by);
 
 CREATE TRIGGER IF NOT EXISTS receipts_no_update  BEFORE UPDATE ON receipts  BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS receipts_no_delete  BEFORE DELETE ON receipts  BEGIN SELECT RAISE(ABORT,'append-only'); END;
@@ -84,15 +105,123 @@ CREATE TRIGGER IF NOT EXISTS writeoffs_no_update BEFORE UPDATE ON writeoffs BEGI
 CREATE TRIGGER IF NOT EXISTS writeoffs_no_delete BEFORE DELETE ON writeoffs BEGIN SELECT RAISE(ABORT,'append-only'); END;
 `;
 
-// Создаёт всю схему (таблицы, индексы, триггеры) и фиксирует версию схемы.
-// Идемпотентно: всё через IF NOT EXISTS, повторный вызов безопасен.
+function hasColumn(table: string, column: string): boolean {
+  const cols = db
+    .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+    .all();
+  return cols.some((c) => c.name === column);
+}
+
+function seedSites() {
+  const ins = db.query<null, [string]>(
+    "INSERT OR IGNORE INTO sites (name) VALUES (?)",
+  );
+  for (const name of DEFAULT_SITES) ins.run(name);
+}
+
+// Миграция существующих v1-БД (site TEXT) на v2 (site_id FK).
+// Rebuild таблиц users/receipts с маппингом имени участка в sites.id.
+function migrateToV2() {
+  const usersHasSite = hasColumn("users", "site");
+  const receiptsHasSite = hasColumn("receipts", "site");
+  if (!usersHasSite && !receiptsHasSite) return; // уже на v2-схеме
+
+  // Засеять sites именами из существующих данных (на случай не-дефолтных участков).
+  if (usersHasSite) {
+    db.exec(
+      "INSERT OR IGNORE INTO sites (name) SELECT DISTINCT site FROM users WHERE site IS NOT NULL AND site <> ''",
+    );
+  }
+  if (receiptsHasSite) {
+    db.exec(
+      "INSERT OR IGNORE INTO sites (name) SELECT DISTINCT site FROM receipts WHERE site IS NOT NULL AND site <> ''",
+    );
+  }
+
+  // FK выключаем на время rebuild (PRAGMA нельзя менять внутри транзакции).
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    if (usersHasSite) {
+      db.exec(`
+        CREATE TABLE users_new (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          password_hash TEXT NOT NULL,
+          role          TEXT NOT NULL CHECK (role IN ('manager','worker')),
+          site_id       INTEGER REFERENCES sites(id),
+          display_name  TEXT,
+          is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+          created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          created_by    INTEGER REFERENCES users(id),
+          CHECK ((role='manager' AND site_id IS NULL) OR (role='worker' AND site_id IS NOT NULL))
+        );
+        INSERT INTO users_new (id, username, password_hash, role, site_id, display_name, is_active, created_at, created_by)
+          SELECT u.id, u.username, u.password_hash, u.role,
+                 (SELECT s.id FROM sites s WHERE s.name = u.site COLLATE NOCASE),
+                 u.display_name, u.is_active, u.created_at, u.created_by
+          FROM users u;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+      `);
+    }
+
+    if (receiptsHasSite) {
+      db.exec(`
+        CREATE TABLE receipts_new (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          site_id       INTEGER NOT NULL REFERENCES sites(id),
+          name          TEXT NOT NULL,
+          code          TEXT NOT NULL,
+          unit          TEXT NOT NULL DEFAULT 'л',
+          qty_initial   REAL NOT NULL CHECK (qty_initial > 0),
+          received_date TEXT NOT NULL CHECK (received_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          created_by    INTEGER NOT NULL REFERENCES users(id),
+          created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        INSERT INTO receipts_new (id, site_id, name, code, unit, qty_initial, received_date, created_by, created_at)
+          SELECT r.id,
+                 (SELECT s.id FROM sites s WHERE s.name = r.site COLLATE NOCASE),
+                 r.name, r.code, r.unit, r.qty_initial, r.received_date, r.created_by, r.created_at
+          FROM receipts r;
+        DROP TABLE receipts;
+        ALTER TABLE receipts_new RENAME TO receipts;
+      `);
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
+    throw e;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
+
+  // Проверка целостности FK после rebuild.
+  const violations = db
+    .query<{ table: string }, []>("PRAGMA foreign_key_check")
+    .all();
+  if (violations.length) {
+    throw new Error(
+      `[db] миграция v2: нарушения FK после rebuild: ${JSON.stringify(violations)}`,
+    );
+  }
+}
+
+// Создаёт всю схему (таблицы, индексы, триггеры), мигрирует старые БД, фиксирует версию.
+// Идемпотентно: безопасно вызывать повторно.
 export function bootstrap() {
-  db.exec(DDL);
+  // 1. Базовые таблицы (свежие БД получают сразу v2-схему; существующие — без изменений).
+  db.exec(BASE_DDL);
+  // 2. Участки по умолчанию.
+  seedSites();
+  // 3. Миграция существующих v1-БД (site TEXT → site_id FK).
+  migrateToV2();
+  // 4. Индексы и триггеры (после возможного rebuild таблиц).
+  db.exec(INDEXES_TRIGGERS_DDL);
 
   const { user_version } = db
     .query<{ user_version: number }, []>("PRAGMA user_version")
     .get()!;
-
   if (user_version < SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }

@@ -67,7 +67,7 @@ const LotCard: React.FC<LotCardProps> = ({
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-gray-500">
             <span>Приход: {lot.receivedDate}</span>
             <span>Автор: {authorName(lot.author)}</span>
-            {showSite && <span>Участок: {lot.site}</span>}
+            {showSite && <span>Участок: {lot.siteName}</span>}
           </div>
         </div>
 
@@ -314,11 +314,11 @@ const StockList: React.FC<StockListProps> = ({
     const order: string[] = [];
     const bySite = new Map<string, Lot[]>();
     for (const lot of lots) {
-      let bucket = bySite.get(lot.site);
+      let bucket = bySite.get(lot.siteName);
       if (!bucket) {
         bucket = [];
-        bySite.set(lot.site, bucket);
-        order.push(lot.site);
+        bySite.set(lot.siteName, bucket);
+        order.push(lot.siteName);
       }
       bucket.push(lot);
     }

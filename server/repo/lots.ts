@@ -10,7 +10,8 @@ type LotListRow = {
   id: number;
   name: string;
   code: string;
-  site: string;
+  site_id: number;
+  site_name: string;
   unit: string;
   qty_initial: number;
   balance: number;
@@ -27,7 +28,8 @@ function mapLot(r: LotListRow): Lot {
     id: r.id,
     name: r.name,
     code: r.code,
-    site: r.site,
+    siteId: r.site_id,
+    siteName: r.site_name,
     unit: r.unit,
     initialQty,
     balance,
@@ -47,7 +49,8 @@ const LIST_SELECT = `
     r.id            AS id,
     r.name          AS name,
     r.code          AS code,
-    r.site          AS site,
+    r.site_id       AS site_id,
+    s.name          AS site_name,
     r.unit          AS unit,
     r.qty_initial   AS qty_initial,
     r.received_date AS received_date,
@@ -58,23 +61,25 @@ const LIST_SELECT = `
       SELECT SUM(w.qty) FROM writeoffs w WHERE w.receipt_id = r.id
     ), 0)           AS balance
   FROM receipts r
+  JOIN sites s ON s.id = r.site_id
   LEFT JOIN users au ON au.id = r.created_by
 `;
 
 // Список партий. Опционально фильтр по участку (для воркера — его site).
 // Сортировка: сначала активные (balance > EPS), затем по received_date DESC, id DESC.
-export function list(opts: { site?: string } = {}): Lot[] {
+export function list(opts: { siteId?: number } = {}): Lot[] {
   // Активность считаем в SQL тем же эпсилон-порогом, что и на беке/фронте.
   const activeExpr =
     "(r.qty_initial - COALESCE((SELECT SUM(w.qty) FROM writeoffs w WHERE w.receipt_id = r.id), 0)) > 1e-9";
 
-  const where = opts.site ? "WHERE r.site = ?" : "";
+  const where = opts.siteId != null ? "WHERE r.site_id = ?" : "";
   const order = `ORDER BY ${activeExpr} DESC, r.received_date DESC, r.id DESC`;
   const sql = `${LIST_SELECT} ${where} ${order}`;
 
-  const rows = opts.site
-    ? db.query<LotListRow, [string]>(sql).all(opts.site)
-    : db.query<LotListRow, []>(sql).all();
+  const rows =
+    opts.siteId != null
+      ? db.query<LotListRow, [number]>(sql).all(opts.siteId)
+      : db.query<LotListRow, []>(sql).all();
 
   return rows.map(mapLot);
 }
@@ -82,7 +87,8 @@ export function list(opts: { site?: string } = {}): Lot[] {
 // Лёгкая выборка партии для проверок (списание/доступ). null если нет.
 export function getById(id: number): {
   id: number;
-  site: string;
+  siteId: number;
+  siteName: string;
   receivedDate: string;
   unit: string;
   name: string;
@@ -92,7 +98,8 @@ export function getById(id: number): {
     .query<
       {
         id: number;
-        site: string;
+        site_id: number;
+        site_name: string;
         received_date: string;
         unit: string;
         name: string;
@@ -100,13 +107,23 @@ export function getById(id: number): {
       },
       [number]
     >(
-      "SELECT id, site, received_date, unit, name, code FROM receipts WHERE id = ?",
+      `SELECT r.id            AS id,
+              r.site_id       AS site_id,
+              s.name          AS site_name,
+              r.received_date AS received_date,
+              r.unit          AS unit,
+              r.name          AS name,
+              r.code          AS code
+         FROM receipts r
+         JOIN sites s ON s.id = r.site_id
+        WHERE r.id = ?`,
     )
     .get(id);
   if (!row) return null;
   return {
     id: row.id,
-    site: row.site,
+    siteId: row.site_id,
+    siteName: row.site_name,
     receivedDate: row.received_date,
     unit: row.unit,
     name: row.name,

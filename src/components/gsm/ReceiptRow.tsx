@@ -1,8 +1,9 @@
 // Строка прихода (manager). Шаблон — ItemRow: grid + useFormContext + useFieldArray('rows').
 // Поля §4/§6: дата получения (type=date, дефолт todayMsk, будущее запрещено),
-// участок (Combobox LOTS, allowCustom=false, через Controller), наименование (свободный input),
-// код (input), кол-во (input decimal, setValueAs=parseQuantity), ед.изм (input, дефолт 'л').
-// Цены здесь НЕТ. Кнопка удаления — только когда строк >1.
+// участок (Combobox по активным участкам, allowCustom=false, через Controller; в форме
+// храним siteName, маппинг name→siteId — на сабмите в ReceiptForm), наименование
+// (свободный input), код (input), кол-во (input decimal, setValueAs=parseQuantity),
+// ед.изм (input, дефолт 'л'). Цены здесь НЕТ. Кнопка удаления — только когда строк >1.
 
 import React from 'react';
 import { useFormContext, Controller } from 'react-hook-form';
@@ -10,16 +11,22 @@ import { Trash2 } from 'lucide-react';
 import type { ReceiptData } from '../../lib/gsmSchemas';
 import { todayMsk } from '../../lib/gsmDates';
 import { parseQuantity } from '../../lib/parseQuantity';
-import { LOTS } from '../../data/lotData';
 import { Combobox } from '../ui/Combobox';
 
 interface ReceiptRowProps {
   index: number;
   canRemove: boolean;
   onRemove: () => void;
+  // Активные участки (опции комбобокса). Combobox строковый — отдаём только имена.
+  sites: Array<{ id: number; name: string }>;
 }
 
-export const ReceiptRow: React.FC<ReceiptRowProps> = ({ index, canRemove, onRemove }) => {
+export const ReceiptRow: React.FC<ReceiptRowProps> = ({
+  index,
+  canRemove,
+  onRemove,
+  sites,
+}) => {
   const {
     control,
     register,
@@ -27,6 +34,7 @@ export const ReceiptRow: React.FC<ReceiptRowProps> = ({ index, canRemove, onRemo
   } = useFormContext<ReceiptData>();
   const rowErrors = errors.rows?.[index];
   const today = todayMsk();
+  const siteOptions = React.useMemo(() => sites.map((s) => s.name), [sites]);
 
   return (
     <div className="bg-white p-5 rounded-lg border border-gray-200 relative group transition-all">
@@ -53,7 +61,7 @@ export const ReceiptRow: React.FC<ReceiptRowProps> = ({ index, canRemove, onRemo
             control={control}
             render={({ field }) => (
               <Combobox
-                options={LOTS}
+                options={siteOptions}
                 value={field.value ?? ''}
                 onChange={field.onChange}
                 placeholder="Выбор участка..."

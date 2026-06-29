@@ -28,10 +28,11 @@ export function create(userId: number): { token: string; expiresAt: string } {
 // Возвращает { user } либо null.
 export function resolve(token: string): { user: User } | null {
   const row = db
-    .query<UserRow, [string]>(
-      `SELECT u.*
+    .query<UserRow & { site_name: string | null }, [string]>(
+      `SELECT u.*, st.name AS site_name
          FROM sessions s
          JOIN users u ON u.id = s.user_id
+         LEFT JOIN sites st ON st.id = u.site_id
         WHERE s.id = ?
           AND s.expires_at > datetime('now')
           AND u.is_active = 1`,
@@ -45,7 +46,7 @@ export function resolve(token: string): { user: User } | null {
     token,
   ]);
 
-  return { user: toUser(row) };
+  return { user: toUser(row, row.site_name) };
 }
 
 // Удалить конкретную сессию (logout).

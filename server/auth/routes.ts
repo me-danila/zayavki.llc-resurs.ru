@@ -45,7 +45,8 @@ authRouter.post("/api/gsm/login", async (req: Request, res: Response) => {
   resetFailures(key);
   const { token } = sessions.create(row.id);
   setSession(res, token);
-  res.status(200).json({ user: toUser(row) });
+  // siteName берём JOIN sites (getUserById): null у менеджера, имя участка у воркера.
+  res.status(200).json({ user: users.getUserById(row.id) ?? toUser(row, null) });
 });
 
 // POST /api/gsm/logout — auth. Удаляет сессию (если есть) + чистит cookie. Всегда 204.
