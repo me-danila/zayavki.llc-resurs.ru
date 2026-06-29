@@ -6,6 +6,7 @@
 
 import React from 'react';
 import {
+  ArrowRightLeft,
   ChevronDown,
   History as HistoryIcon,
   MinusCircle,
@@ -19,6 +20,7 @@ export interface StockListProps {
   lots: Lot[];
   scope: 'manager' | 'worker';
   onWriteOff?: (lot: Lot) => void;
+  onTransfer?: (lot: Lot) => void;
   onHistory: (lot: Lot) => void;
 }
 
@@ -38,6 +40,7 @@ interface LotCardProps {
   expanded: boolean;
   onToggleHistory: () => void;
   onWriteOff?: (lot: Lot) => void;
+  onTransfer?: (lot: Lot) => void;
 }
 
 const LotCard: React.FC<LotCardProps> = ({
@@ -47,9 +50,12 @@ const LotCard: React.FC<LotCardProps> = ({
   expanded,
   onToggleHistory,
   onWriteOff,
+  onTransfer,
 }) => {
   const active = isActive(lot);
   const canWriteOff = scope === 'worker' && active;
+  // Перемещать можно активные партии в обеих ролях (если родитель дал onTransfer).
+  const canTransfer = active && Boolean(onTransfer);
 
   return (
     <div
@@ -95,6 +101,16 @@ const LotCard: React.FC<LotCardProps> = ({
           >
             <MinusCircle className="h-4 w-4" />
             Списать
+          </button>
+        )}
+        {canTransfer && (
+          <button
+            type="button"
+            onClick={() => onTransfer?.(lot)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-gray-700 transition-all hover:bg-gray-50"
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            Переместить
           </button>
         )}
         <button
@@ -150,6 +166,7 @@ interface ArchiveSectionProps {
   openId: number | null;
   onToggleHistory: (lot: Lot) => void;
   onWriteOff?: (lot: Lot) => void;
+  onTransfer?: (lot: Lot) => void;
 }
 
 const ArchiveSection: React.FC<ArchiveSectionProps> = ({
@@ -159,6 +176,7 @@ const ArchiveSection: React.FC<ArchiveSectionProps> = ({
   openId,
   onToggleHistory,
   onWriteOff,
+  onTransfer,
 }) => {
   const [open, setOpen] = React.useState(false);
   if (lots.length === 0) return null;
@@ -187,6 +205,7 @@ const ArchiveSection: React.FC<ArchiveSectionProps> = ({
               expanded={openId === lot.id}
               onToggleHistory={() => onToggleHistory(lot)}
               onWriteOff={onWriteOff}
+              onTransfer={onTransfer}
             />
           ))}
         </div>
@@ -204,6 +223,7 @@ interface FlatListProps {
   openId: number | null;
   onToggleHistory: (lot: Lot) => void;
   onWriteOff?: (lot: Lot) => void;
+  onTransfer?: (lot: Lot) => void;
 }
 
 const FlatList: React.FC<FlatListProps> = ({
@@ -213,6 +233,7 @@ const FlatList: React.FC<FlatListProps> = ({
   openId,
   onToggleHistory,
   onWriteOff,
+  onTransfer,
 }) => {
   const active = lots.filter(isActive);
   const archive = lots.filter((l) => !isActive(l));
@@ -228,6 +249,7 @@ const FlatList: React.FC<FlatListProps> = ({
           expanded={openId === lot.id}
           onToggleHistory={() => onToggleHistory(lot)}
           onWriteOff={onWriteOff}
+          onTransfer={onTransfer}
         />
       ))}
       <ArchiveSection
@@ -237,6 +259,7 @@ const FlatList: React.FC<FlatListProps> = ({
         openId={openId}
         onToggleHistory={onToggleHistory}
         onWriteOff={onWriteOff}
+        onTransfer={onTransfer}
       />
     </div>
   );
@@ -249,6 +272,7 @@ interface SiteGroupProps {
   lots: Lot[];
   openId: number | null;
   onToggleHistory: (lot: Lot) => void;
+  onTransfer?: (lot: Lot) => void;
 }
 
 const SiteGroup: React.FC<SiteGroupProps> = ({
@@ -256,6 +280,7 @@ const SiteGroup: React.FC<SiteGroupProps> = ({
   lots,
   openId,
   onToggleHistory,
+  onTransfer,
 }) => {
   const [open, setOpen] = React.useState(true);
   const activeCount = lots.filter(isActive).length;
@@ -290,6 +315,7 @@ const SiteGroup: React.FC<SiteGroupProps> = ({
             showSite={false}
             openId={openId}
             onToggleHistory={onToggleHistory}
+            onTransfer={onTransfer}
           />
         </div>
       )}
@@ -303,6 +329,7 @@ const StockList: React.FC<StockListProps> = ({
   lots,
   scope,
   onWriteOff,
+  onTransfer,
   onHistory,
 }) => {
   const { openId, toggle } = useExpanded(onHistory);
@@ -332,6 +359,7 @@ const StockList: React.FC<StockListProps> = ({
             lots={bySite.get(site) as Lot[]}
             openId={openId}
             onToggleHistory={toggle}
+            onTransfer={onTransfer}
           />
         ))}
       </div>
@@ -347,6 +375,7 @@ const StockList: React.FC<StockListProps> = ({
       openId={openId}
       onToggleHistory={toggle}
       onWriteOff={onWriteOff}
+      onTransfer={onTransfer}
     />
   );
 };

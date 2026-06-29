@@ -145,6 +145,8 @@ export function history(
   const lot = mapLot(lotRow);
 
   // Списания в порядке: дата ASC, затем id ASC (стабильно по вставке).
+  // LEFT JOIN transfers t_out — если списание это перемещение, поднимаем имя
+  // целевого участка (to_receipt → sites). Тогда событие — transfer_out.
   const wos = db
     .query<
       {
@@ -155,6 +157,7 @@ export function history(
         reason: string;
         author_username: string | null;
         author_display_name: string | null;
+        transfer_site_name: string | null;
       },
       [number]
     >(
@@ -165,42 +168,83 @@ export function history(
          w.license_plate AS license_plate,
          w.reason        AS reason,
          au.username     AS author_username,
-         au.display_name AS author_display_name
+         au.display_name AS author_display_name,
+         to_s.name       AS transfer_site_name
        FROM writeoffs w
        LEFT JOIN users au ON au.id = w.created_by
+       LEFT JOIN transfers t_out ON t_out.writeoff_id = w.id
+       LEFT JOIN receipts to_r ON to_r.id = t_out.to_receipt_id
+       LEFT JOIN sites to_s ON to_s.id = to_r.site_id
        WHERE w.receipt_id = ?
        ORDER BY w.writeoff_date ASC, w.id ASC`,
     )
     .all(id);
+
+  // Является ли ЭТА партия целью какого-то перемещения (to_receipt_id=id)?
+  // Если да — первое событие партии = transfer_in, counterSiteName = исходный участок.
+  const inRow = db
+    .query<{ from_site_name: string }, [number]>(
+      `SELECT from_s.name AS from_site_name
+         FROM transfers t
+         JOIN receipts from_r ON from_r.id = t.from_receipt_id
+         JOIN sites from_s ON from_s.id = from_r.site_id
+        WHERE t.to_receipt_id = ?
+        LIMIT 1`,
+    )
+    .get(id);
 
   const events: HistoryEvent[] = [];
 
   // Первое событие — приход (нарастающий остаток стартует с initialQty).
   let running = lot.initialQty;
   // Автор прихода = автор партии (lot.author).
-  events.push({
-    kind: "receipt",
-    date: lot.receivedDate,
-    qty: lot.initialQty,
-    balanceAfter: round3(running),
-    author: lot.author,
-  });
+  events.push(
+    inRow
+      ? {
+          kind: "transfer_in",
+          date: lot.receivedDate,
+          qty: lot.initialQty,
+          balanceAfter: round3(running),
+          counterSiteName: inRow.from_site_name,
+          author: lot.author,
+        }
+      : {
+          kind: "receipt",
+          date: lot.receivedDate,
+          qty: lot.initialQty,
+          balanceAfter: round3(running),
+          author: lot.author,
+        },
+  );
 
   for (const w of wos) {
     const qty = round3(w.qty);
     running = round3(running - qty);
-    events.push({
-      kind: "writeoff",
-      date: w.writeoff_date,
-      qty,
-      balanceAfter: running,
-      licensePlate: w.license_plate,
-      reason: w.reason,
-      author: {
-        username: w.author_username ?? "",
-        displayName: w.author_display_name,
-      },
-    });
+    const author = {
+      username: w.author_username ?? "",
+      displayName: w.author_display_name,
+    };
+    if (w.transfer_site_name != null) {
+      // Перемещение: № авто/причину не показываем, добавляем counterSiteName.
+      events.push({
+        kind: "transfer_out",
+        date: w.writeoff_date,
+        qty,
+        balanceAfter: running,
+        counterSiteName: w.transfer_site_name,
+        author,
+      });
+    } else {
+      events.push({
+        kind: "writeoff",
+        date: w.writeoff_date,
+        qty,
+        balanceAfter: running,
+        licensePlate: w.license_plate,
+        reason: w.reason,
+        author,
+      });
+    }
   }
 
   // Финальный running после всех списаний совпадает с lot.balance (тот же round3/EPS).

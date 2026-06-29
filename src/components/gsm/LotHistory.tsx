@@ -3,7 +3,12 @@
 // (№ авто, −qty, остаток-после, причина, автор). Время не выводим (канон §3.2).
 
 import React from 'react';
-import { Loader2, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import {
+  Loader2,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  ArrowRightLeft,
+} from 'lucide-react';
 import { getHistory } from '../../lib/gsmApi';
 import type { HistoryEvent } from '../../lib/gsmTypes';
 
@@ -69,7 +74,18 @@ const LotHistory: React.FC<LotHistoryProps> = ({ lotId, unit = 'л' }) => {
   return (
     <ul className="mt-3 space-y-2 border-t border-gray-100 pt-3">
       {events.map((ev, i) => {
-        const isReceipt = ev.kind === 'receipt';
+        const isIncoming = ev.kind === 'receipt' || ev.kind === 'transfer_in';
+        const isTransfer =
+          ev.kind === 'transfer_in' || ev.kind === 'transfer_out';
+        // Подпись события (нижняя строка с автором).
+        const label =
+          ev.kind === 'receipt'
+            ? 'Приход'
+            : ev.kind === 'writeoff'
+              ? 'Списание'
+              : ev.kind === 'transfer_in'
+                ? `Поступление ← ${ev.counterSiteName ?? '—'}`
+                : `Перемещение → ${ev.counterSiteName ?? '—'}`;
         return (
           <li
             key={i}
@@ -77,12 +93,14 @@ const LotHistory: React.FC<LotHistoryProps> = ({ lotId, unit = 'л' }) => {
           >
             <div
               className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                isReceipt
+                isIncoming
                   ? 'bg-resource-primary/20 text-gray-700'
                   : 'bg-gray-200 text-gray-600'
               }`}
             >
-              {isReceipt ? (
+              {isTransfer ? (
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+              ) : isIncoming ? (
                 <ArrowDownToLine className="h-3.5 w-3.5" />
               ) : (
                 <ArrowUpFromLine className="h-3.5 w-3.5" />
@@ -96,20 +114,20 @@ const LotHistory: React.FC<LotHistoryProps> = ({ lotId, unit = 'л' }) => {
                 </span>
                 <span
                   className={`text-xs font-bold ${
-                    isReceipt ? 'text-green-600' : 'text-red-500'
+                    isIncoming ? 'text-green-600' : 'text-red-500'
                   }`}
                 >
-                  {isReceipt ? '+' : '−'}
+                  {isIncoming ? '+' : '−'}
                   {fmtQty(ev.qty)} {unit}
                 </span>
-                {!isReceipt && (
+                {!isIncoming && (
                   <span className="text-[11px] text-gray-500">
                     остаток: {fmtQty(ev.balanceAfter)} {unit}
                   </span>
                 )}
               </div>
 
-              {!isReceipt && (
+              {ev.kind === 'writeoff' && (
                 <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
                   {ev.licensePlate && (
                     <span>
@@ -125,7 +143,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({ lotId, unit = 'л' }) => {
               )}
 
               <p className="mt-0.5 text-[11px] text-gray-400">
-                {isReceipt ? 'Приход' : 'Списание'} — {authorName(ev.author)}
+                {label} — {authorName(ev.author)}
               </p>
             </div>
           </li>

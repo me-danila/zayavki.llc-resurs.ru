@@ -11,6 +11,7 @@ import * as receipts from "../repo/receipts";
 import * as writeoffs from "../repo/writeoffs";
 import * as users from "../repo/users";
 import * as sites from "../repo/sites";
+import * as transfers from "../repo/transfers";
 import { isValidDate } from "../lib/dates";
 
 export const gsmRouter = Router();
@@ -29,6 +30,17 @@ gsmRouter.get(
   requireManager,
   (_req: Request, res: Response): void => {
     res.status(200).json({ sites: sites.list({ includeArchived: true }) });
+  },
+);
+
+// GET /api/gsm/sites/active — auth (worker + manager). Только активные участки.
+// Нужен для выпадашки целевого участка перемещения у ОБЕИХ ролей
+// (воркеру /api/gsm/sites под requireManager недоступен).
+gsmRouter.get(
+  "/api/gsm/sites/active",
+  requireAuth,
+  (_req: Request, res: Response): void => {
+    res.status(200).json({ sites: sites.list({ includeArchived: false }) });
   },
 );
 
@@ -265,6 +277,60 @@ gsmRouter.post(
         return;
       case "date":
         res.status(400).json({ error: "date" });
+        return;
+      case "exceeds":
+        res.status(409).json({ error: "exceeds", balance: result.balance });
+        return;
+    }
+  },
+);
+
+// POST /api/gsm/lots/:id/transfer — auth (worker + manager).
+// Тело: {toSiteId,qty,date}. Перемещение партии :id на другой активный участок.
+// Воркер: исходная партия должна быть его участка (иначе 404). Менеджер: любая.
+// Маппинг ошибок: not_found/forbidden → 404; same_site/inactive_site/date → 400;
+// exceeds → 409 {error,balance}; ok → 201 {toReceiptId}.
+gsmRouter.post(
+  "/api/gsm/lots/:id/transfer",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    const user = req.user!;
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as {
+      toSiteId?: unknown;
+      qty?: unknown;
+      date?: unknown;
+    };
+    const toSiteId =
+      typeof body.toSiteId === "number" ? body.toSiteId : Number(body.toSiteId);
+    const qty = typeof body.qty === "number" ? body.qty : Number(body.qty);
+    const date = typeof body.date === "string" ? body.date : "";
+
+    const result = transfers.create(id, toSiteId, qty, date, {
+      id: user.id,
+      role: user.role,
+      siteId: user.siteId,
+    });
+
+    if (result.ok) {
+      res.status(201).json({ toReceiptId: result.toReceiptId });
+      return;
+    }
+
+    switch (result.error) {
+      case "not_found":
+      case "forbidden":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "same_site":
+      case "inactive_site":
+      case "date":
+        res.status(400).json({ error: result.error });
         return;
       case "exceeds":
         res.status(409).json({ error: "exceeds", balance: result.balance });

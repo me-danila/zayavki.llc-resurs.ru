@@ -113,6 +113,17 @@ export async function restoreSite(id: number): Promise<void> {
   await request<void>(`/sites/${id}/restore`, { method: 'POST' });
 }
 
+// GET /sites/active → Site[] активных. requireAuth: доступно ОБЕИМ ролям
+// (воркеру /sites недоступен) — для выпадашки целевого участка перемещения.
+export async function getActiveSites(): Promise<Site[]> {
+  const { data } = await request<{ sites: Site[] }>('/sites/active');
+  return data.sites.map((s) => ({
+    id: s.id,
+    name: s.name,
+    active: Boolean(s.active),
+  }));
+}
+
 // --- Lots / inventory ---
 
 // GET /lots → Lot[]. Сервер сам фильтрует по роли/участку.
@@ -168,6 +179,23 @@ export async function createWriteoffs(
     }
     throw err;
   }
+}
+
+// POST /lots/:id/transfer {toSiteId,qty,date} → {toReceiptId}. requireAuth.
+// Атомарно: списание с исходной партии + новая партия на целевом участке.
+// Ошибки пробрасываются как ApiError (.status / .body):
+//   400 {error:'date'|'same_site'|'inactive_site'|'invalid'}
+//   404 {error:'not_found'} (нет партии / воркер чужого участка)
+//   409 {error:'exceeds', balance} — превышение остатка исходной партии.
+export async function transferLot(
+  lotId: number,
+  body: { toSiteId: number; qty: number; date: string }
+): Promise<{ toReceiptId: number }> {
+  const { data } = await request<{ toReceiptId: number }>(
+    `/lots/${lotId}/transfer`,
+    { method: 'POST', body }
+  );
+  return data;
 }
 
 // GET /lots/:id/history → {lot, events}.

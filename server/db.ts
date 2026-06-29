@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -99,10 +99,29 @@ CREATE INDEX IF NOT EXISTS idx_receipts_cby      ON receipts(created_by);
 CREATE INDEX IF NOT EXISTS idx_writeoffs_recpt   ON writeoffs(receipt_id);
 CREATE INDEX IF NOT EXISTS idx_writeoffs_cby     ON writeoffs(created_by);
 
+-- transfers: перемещение партии между участками (v3). Создаём после migrateToV2,
+-- поэтому FK ссылаются на финальные receipts/writeoffs/users (в т.ч. для мигрированных v1-БД).
+CREATE TABLE IF NOT EXISTS transfers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_receipt_id INTEGER NOT NULL REFERENCES receipts(id),
+  to_receipt_id   INTEGER NOT NULL REFERENCES receipts(id),
+  writeoff_id     INTEGER NOT NULL REFERENCES writeoffs(id),
+  qty REAL NOT NULL CHECK (qty > 0),
+  transfer_date TEXT NOT NULL CHECK (transfer_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_transfers_from     ON transfers(from_receipt_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_to       ON transfers(to_receipt_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_writeoff ON transfers(writeoff_id);
+
 CREATE TRIGGER IF NOT EXISTS receipts_no_update  BEFORE UPDATE ON receipts  BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS receipts_no_delete  BEFORE DELETE ON receipts  BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS writeoffs_no_update BEFORE UPDATE ON writeoffs BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS writeoffs_no_delete BEFORE DELETE ON writeoffs BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS transfers_no_update BEFORE UPDATE ON transfers BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS transfers_no_delete BEFORE DELETE ON transfers BEGIN SELECT RAISE(ABORT,'append-only'); END;
 `;
 
 function hasColumn(table: string, column: string): boolean {

@@ -9,8 +9,9 @@ import { Loader2 } from 'lucide-react';
 import GsmHeader from '../../components/gsm/GsmHeader';
 import StockList from '../../components/gsm/StockList';
 import WriteOffForm from '../../components/gsm/WriteOffForm';
-import { getLots } from '../../lib/gsmApi';
-import type { Lot, User } from '../../lib/gsmTypes';
+import TransferForm from '../../components/gsm/TransferForm';
+import { getLots, getActiveSites } from '../../lib/gsmApi';
+import type { Lot, Site, User } from '../../lib/gsmTypes';
 
 export interface EmployeePageProps {
   user: User;
@@ -21,6 +22,10 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
   const [lots, setLots] = React.useState<Lot[] | null>(null);
   const [error, setError] = React.useState(false);
   const [selectedLot, setSelectedLot] = React.useState<Lot | null>(null);
+  // Партия, выбранная для перемещения (открывает TransferForm).
+  const [transferLot, setTransferLot] = React.useState<Lot | null>(null);
+  // Активные участки — опции целевого участка перемещения (доступно воркеру через /sites/active).
+  const [activeSites, setActiveSites] = React.useState<Site[]>([]);
 
   const loadLots = React.useCallback(async () => {
     setError(false);
@@ -50,9 +55,37 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
     };
   }, []);
 
-  // Открыть форму списания по выбранной партии.
+  // Активные участки на mount (для выпадашки целевого участка перемещения).
+  React.useEffect(() => {
+    let alive = true;
+    getActiveSites()
+      .then((sites) => {
+        if (alive) setActiveSites(sites);
+      })
+      .catch(() => {
+        if (alive) setActiveSites([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Открыть форму списания по выбранной партии (перемещение — закрыть).
   const handleWriteOff = (lot: Lot) => {
+    setTransferLot(null);
     setSelectedLot(lot);
+  };
+
+  // Открыть форму перемещения по выбранной партии (списание — закрыть).
+  const handleTransfer = (lot: Lot) => {
+    setSelectedLot(null);
+    setTransferLot(lot);
+  };
+
+  // После успешного перемещения — закрыть форму и обновить остатки.
+  const handleTransferDone = async () => {
+    setTransferLot(null);
+    await loadLots();
   };
 
   // История раскрывается внутри StockList; коллбек обязателен по контракту StockListProps.
@@ -85,6 +118,17 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
           />
         )}
 
+        {/* Форма перемещения выбранной партии */}
+        {transferLot && (
+          <TransferForm
+            key={transferLot.id}
+            lot={transferLot}
+            sites={activeSites}
+            onDone={handleTransferDone}
+            onCancel={() => setTransferLot(null)}
+          />
+        )}
+
         {/* Список партий участка */}
         {lots === null ? (
           <div className="flex items-center gap-2 py-10 text-sm text-gray-400">
@@ -113,6 +157,7 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
             lots={lots}
             scope="worker"
             onWriteOff={handleWriteOff}
+            onTransfer={handleTransfer}
             onHistory={handleHistory}
           />
         )}

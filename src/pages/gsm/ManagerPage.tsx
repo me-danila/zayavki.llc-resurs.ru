@@ -13,6 +13,7 @@ import GsmHeader from '../../components/gsm/GsmHeader';
 import CollapsibleSection from '../../components/gsm/CollapsibleSection';
 import ReceiptForm from '../../components/gsm/ReceiptForm';
 import StockList from '../../components/gsm/StockList';
+import TransferForm from '../../components/gsm/TransferForm';
 import EmployeeAdmin from '../../components/gsm/EmployeeAdmin';
 import SiteAdmin from '../../components/gsm/SiteAdmin';
 
@@ -31,6 +32,8 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
   // Активные участки — опции для форм прихода и сотрудника. SiteAdmin сам ведёт
   // полный список (включая архив); сюда подгружаем только активные.
   const [activeSites, setActiveSites] = React.useState<Site[]>([]);
+  // Партия, выбранная для перемещения (открывает TransferForm).
+  const [transferLot, setTransferLot] = React.useState<Lot | null>(null);
 
   const loadLots = React.useCallback(async () => {
     setLotsError(false);
@@ -57,6 +60,12 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
     void loadSites();
   }, [loadLots, loadSites]);
 
+  // После успешного перемещения — закрыть форму и обновить остатки.
+  const handleTransferDone = React.useCallback(async () => {
+    setTransferLot(null);
+    await loadLots();
+  }, [loadLots]);
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] font-sans">
       <GsmHeader user={user} onLogout={onLoggedOut} />
@@ -78,8 +87,25 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
           {lotsError && (
             <p className="py-2 text-xs text-red-500">Не удалось загрузить остатки.</p>
           )}
+          {/* Форма перемещения выбранной партии (любой участок — менеджер). */}
+          {transferLot && (
+            <div className="mb-4">
+              <TransferForm
+                key={transferLot.id}
+                lot={transferLot}
+                sites={activeSites}
+                onDone={handleTransferDone}
+                onCancel={() => setTransferLot(null)}
+              />
+            </div>
+          )}
           {lots !== null && !lotsError && (
-            <StockList lots={lots} scope="manager" onHistory={() => {}} />
+            <StockList
+              lots={lots}
+              scope="manager"
+              onTransfer={setTransferLot}
+              onHistory={() => {}}
+            />
           )}
         </CollapsibleSection>
 

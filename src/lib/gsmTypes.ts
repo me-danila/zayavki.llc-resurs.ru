@@ -33,12 +33,14 @@ export type Lot = {
 };
 
 export type HistoryEvent = {
-  kind: 'receipt' | 'writeoff';
+  kind: 'receipt' | 'writeoff' | 'transfer_out' | 'transfer_in';
   date: string;
   qty: number;
   balanceAfter: number;
   licensePlate?: string;
   reason?: string;
+  // На чей участок ушло (transfer_out) / с чьего пришло (transfer_in).
+  counterSiteName?: string;
   author: { username: string; displayName: string | null };
 };
 
