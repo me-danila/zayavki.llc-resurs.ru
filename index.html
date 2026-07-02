@@ -4,7 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Заявка ООО «Ресурс»</title>
+    <title>ООО «Ресурс»</title>
+    <script>
+      // Нативный title по маршруту — до первого рендера, без скачка.
+      if (location.pathname.replace(/\/+$/, '') === '/gsm') document.title = 'Карточка ГСМ';
+    </script>
   </head>
   <body>
     <div id="root"></div>

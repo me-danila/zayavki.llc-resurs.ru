@@ -4,7 +4,7 @@ export interface Initiator {
 }
 
 export const INITIATORS: Initiator[] = [
-  { name: "Коржаков Анатолиий Борисович", position: "Главный механик" },
+  { name: "Коржавов Анатолиий Борисович", position: "Главный механик" },
   { name: "Редько Александр Сергеевич", position: "Механик" },
   { name: "Евсеев Сергей Петрович", position: "Механик" },
   { name: "Павлов Александр Васильевич", position: "Начальник участка" },

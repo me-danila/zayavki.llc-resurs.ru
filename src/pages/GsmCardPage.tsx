@@ -11,11 +11,6 @@ import EmployeePage from './gsm/EmployeePage';
 const GsmCardPage: React.FC = () => {
   const { user, loading, setUser, logout } = useSession();
 
-  // Title страницы /gsm — «Карточка ГСМ» (главная / остаётся со своим title из index.html).
-  React.useEffect(() => {
-    document.title = 'Карточка ГСМ';
-  }, []);
-
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F9FAFB] flex items-center justify-center font-sans">
