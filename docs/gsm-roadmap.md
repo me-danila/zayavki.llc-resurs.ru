@@ -176,7 +176,7 @@ server/auth/rateLimit.ts loginLimiter(key):boolean
 
 **Этап 0 — Инфраструктура + БД-слой.** `server/db.ts`, `server/lib/num.ts`, `server/lib/dates.ts`, `server/data/.gitkeep`; правки `.gitignore` (+`server/data/`), `.dockerignore` (+`server/data/`), `docker-compose.yml` (**named volume на `/app/server/data`**, например `volumes: [gsmdata:/app/server/data]`). Приёмка: импорт `db.ts` создаёт БД и все таблицы/триггеры; UPDATE по receipts падает с `append-only`; рестарт контейнера сохраняет данные.
 
-**Этап 1 — Сид + репозитории.** `server/seed.ts` (менеджеры + стартовые воркеры из env, `ON CONFLICT DO NOTHING`, печать логинов без паролей; npm-скрипт `seed`); `server/repo/*.ts` по §5. Приёмка: списание серией атомарно; остаток с эпсилон; гонка не уводит в минус.
+**Этап 1 — Репозитории.** `server/repo/*.ts` по §5. Приёмка: списание серией атомарно; остаток с эпсилон; гонка не уводит в минус. (Сид-скрипт `server/seed.ts` удалён — устарел после миграции схемы на `site_id`; пользователи заводятся менеджером в UI.)
 
 **Этап 2 — Авторизация (бек).** `server/auth/*`; правки `server/index.ts` (CORS сузить, `trust proxy`, guard смонтирован перед gsm-роутером, кроме `/login`). Эндпоинты `/login`,`/logout`,`/me`. Приёмка: без cookie `/api/gsm/*` (кроме login) → 401; неверный пароль → 401; rate-limit.
 
