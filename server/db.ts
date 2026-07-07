@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -116,12 +116,38 @@ CREATE INDEX IF NOT EXISTS idx_transfers_from     ON transfers(from_receipt_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_to       ON transfers(to_receipt_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_writeoff ON transfers(writeoff_id);
 
+-- corrections: сторно/правка записей менеджером (v4). Append-only сохраняется:
+-- правка/отмена = НОВАЯ строка, никаких UPDATE receipts/writeoffs.
+-- На одну запись может быть несколько корректировок; ДЕЙСТВУЕТ ПОСЛЕДНЯЯ
+-- (max id per (target_kind, target_id)). action='void' — все new_* NULL.
+-- action='edit' — repo/corrections.ts заполняет ВСЕ new_*-поля целевого типа
+-- снапшотом итогового состояния, поэтому выборки смотрят только последнюю строку.
+CREATE TABLE IF NOT EXISTS corrections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_kind TEXT NOT NULL CHECK (target_kind IN ('receipt','writeoff')),
+  target_id INTEGER NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('void','edit')),
+  new_date TEXT CHECK (new_date IS NULL OR new_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  new_qty REAL CHECK (new_qty IS NULL OR new_qty > 0),
+  new_name TEXT,
+  new_code TEXT,
+  new_unit TEXT,
+  new_license_plate TEXT,
+  new_reason TEXT,
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_corrections_target ON corrections(target_kind, target_id);
+
 CREATE TRIGGER IF NOT EXISTS receipts_no_update  BEFORE UPDATE ON receipts  BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS receipts_no_delete  BEFORE DELETE ON receipts  BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS writeoffs_no_update BEFORE UPDATE ON writeoffs BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS writeoffs_no_delete BEFORE DELETE ON writeoffs BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS transfers_no_update BEFORE UPDATE ON transfers BEGIN SELECT RAISE(ABORT,'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS transfers_no_delete BEFORE DELETE ON transfers BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS corrections_no_update BEFORE UPDATE ON corrections BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS corrections_no_delete BEFORE DELETE ON corrections BEGIN SELECT RAISE(ABORT,'append-only'); END;
 `;
 
 function hasColumn(table: string, column: string): boolean {

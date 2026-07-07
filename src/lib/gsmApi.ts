@@ -208,6 +208,60 @@ export async function getHistory(
   return data;
 }
 
+// --- Корректировки (manager-only) ---
+
+// Тело POST /writeoffs/:id/correct: сторно (void) или правка полей списания (edit).
+export type WriteoffCorrectPayload =
+  | { action: 'void' }
+  | {
+      action: 'edit';
+      date?: string;
+      amount?: number;
+      licensePlate?: string;
+      reason?: string;
+    };
+
+// POST /writeoffs/:id/correct → 201 {id}. Ошибки пробрасываем как ApiError:
+//   400 {error:'invalid'}; 404;
+//   409 {error:'transfer_locked'|'already_voided'} | {error:'exceeds', balance}.
+// UI читает код ошибки из .message (это поле error) и balance из .body.
+export async function correctWriteoff(
+  id: number,
+  body: WriteoffCorrectPayload
+): Promise<{ id: number }> {
+  const { data } = await request<{ id: number }>(`/writeoffs/${id}/correct`, {
+    method: 'POST',
+    body,
+  });
+  return data;
+}
+
+// Тело POST /receipts/:id/correct (id прихода = id партии lot.id).
+// Участок через edit не меняется — для этого «Переместить».
+export type ReceiptCorrectPayload =
+  | { action: 'void' }
+  | {
+      action: 'edit';
+      receivedDate?: string;
+      name?: string;
+      code?: string;
+      unit?: string;
+      quantity?: number;
+    };
+
+// POST /receipts/:id/correct → 201 {id}. Ошибки — как у correctWriteoff,
+// плюс 409 {error:'has_writeoffs'} (сторно прихода, по которому есть списания).
+export async function correctReceipt(
+  id: number,
+  body: ReceiptCorrectPayload
+): Promise<{ id: number }> {
+  const { data } = await request<{ id: number }>(`/receipts/${id}/correct`, {
+    method: 'POST',
+    body,
+  });
+  return data;
+}
+
 // --- Employees (manager-only) ---
 
 // GET /employees → Employee[] (все воркеры: активные сверху, архивные ниже).

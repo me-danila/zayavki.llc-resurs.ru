@@ -4,6 +4,7 @@
 import { db } from "../db";
 import { round3, isPositive, gt } from "../lib/num";
 import { isValidDate, todayMsk, lte, gte as dateGte } from "../lib/dates";
+import { RECEIPT_CORR_JOIN, RECEIPT_NOT_VOIDED, BALANCE_EFF } from "./lots";
 
 export type WriteOffInput = {
   date: string;
@@ -37,19 +38,20 @@ export function createSeries(
   db.exec("BEGIN IMMEDIATE");
   try {
     // Партия + текущий остаток внутри транзакции (консистентный снимок).
+    // Значения эффективные (v4): корректировки прихода/списаний учтены,
+    // voided-партия «не существует» (нет строки → not_found).
     const lot = db
       .query<
         { site_id: number; received_date: string; balance: number },
         [number]
       >(
         `SELECT
-           r.site_id       AS site_id,
-           r.received_date AS received_date,
-           r.qty_initial - COALESCE((
-             SELECT SUM(w.qty) FROM writeoffs w WHERE w.receipt_id = r.id
-           ), 0)           AS balance
+           r.site_id                              AS site_id,
+           COALESCE(cr.new_date, r.received_date) AS received_date,
+           ${BALANCE_EFF}                         AS balance
          FROM receipts r
-         WHERE r.id = ?`,
+         ${RECEIPT_CORR_JOIN}
+         WHERE r.id = ? AND ${RECEIPT_NOT_VOIDED}`,
       )
       .get(receiptId);
 

@@ -91,6 +91,27 @@ CREATE TRIGGER IF NOT EXISTS writeoffs_no_delete BEFORE DELETE ON writeoffs BEGI
 
 Остаток партии = `qty_initial − Σ writeoffs.qty`. `created_at` — только технический аудит, **никогда не выводится**; порядок событий одного дня — по `id` (порядок вставки).
 
+**Схема v4 — corrections (сторно/правка менеджером).** Append-only сохраняется: правка/отмена записи = НОВАЯ строка в `corrections`, никаких UPDATE receipts/writeoffs.
+
+```sql
+CREATE TABLE IF NOT EXISTS corrections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_kind TEXT NOT NULL CHECK (target_kind IN ('receipt','writeoff')),
+  target_id INTEGER NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('void','edit')),
+  new_date TEXT CHECK (new_date IS NULL OR new_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  new_qty REAL CHECK (new_qty IS NULL OR new_qty > 0),
+  new_name TEXT, new_code TEXT, new_unit TEXT,          -- только для receipt
+  new_license_plate TEXT, new_reason TEXT,              -- только для writeoff
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_corrections_target ON corrections(target_kind, target_id);
+-- + append-only триггеры corrections_no_update / corrections_no_delete
+```
+
+Правила: корректировок на запись может быть несколько — **действует последняя** (`MAX(id)` per `(target_kind,target_id)`). `action='void'` — все `new_*` NULL, запись «мертва» (дальнейшие корректировки → `already_voided`). `action='edit'` — репо пишет **снапшот итогового состояния** во все `new_*`-поля целевого типа, поэтому выборки смотрят только последнюю корректировку. Все выборки/балансы считаются по **эффективным** значениям (SQL-фрагменты экспортирует `server/repo/lots.ts`): voided-приход исключается из списков, voided-списание не уменьшает остаток. Записи, связанные с перемещением (`transfers`), неприкосновенны → `transfer_locked`. Void прихода — только без активных списаний (`has_writeoffs`); edit не должен увести остаток в минус (`exceeds`).
+
 ## 3. Сквозные политики (ОБЯЗАТЕЛЬНЫ во всех местах)
 
 1. **Float-эпсилон.** Кол-ва округляем до 3 знаков на входе (бек). `EPS = 1e-9`. Активная партия: `balance > EPS`; архив: `balance ≤ EPS`. Одинаково в SQL-фильтрах, бек-валидации списания, фронт-валидации и расчёте бегущего остатка.
@@ -125,6 +146,8 @@ type HistoryEvent = { kind:'receipt'|'writeoff'; date:string; qty:number; balanc
 | `GET /api/gsm/employees` | manager | → `{employees:[{id,username,displayName,site}]}` | только активные |
 | `POST /api/gsm/employees` | manager | `{username,password,displayName,site}` → `201 {id}` / `409` / `400` | роль форсится `worker`; `site∈LOTS`; пароль≥6; занятый логин → реактивация или 409 |
 | `DELETE /api/gsm/employees/:id` | manager | → `204` | `is_active=0`, только `role='worker'` |
+| `POST /api/gsm/writeoffs/:id/correct` | manager | `{action:'void'}` \| `{action:'edit', date?, amount?, licensePlate?, reason?}` → `201 {id}` / `400 invalid` / `404` / `409 {error[,balance]}` | v4: сторно/правка списания; `transfer_locked`/`already_voided`/`exceeds+balance` → 409 |
+| `POST /api/gsm/receipts/:id/correct` | manager | `{action:'void'}` \| `{action:'edit', receivedDate?, name?, code?, unit?, quantity?}` → `201 {id}` / `400 invalid` / `404` / `409 {error[,balance]}` | v4: сторно/правка партии (участок не меняется); + `has_writeoffs` → 409 |
 
 ## 5. Контракты модулей (сигнатуры — чтобы слои стыковались)
 

@@ -67,6 +67,24 @@ export type HistoryEvent = {
   // Для transfer_out — целевой участок; для transfer_in — исходный участок.
   counterSiteName?: string;
   author: { username: string; displayName: string | null };
+  // id списания — для кнопок сторно/правки на фронте (у прихода есть id партии).
+  writeoffId?: number;
+  // Действующая корректировка (v4): значения события уже эффективные,
+  // original — то, что было ДО корректировки; date — день правки (YYYY-MM-DD).
+  correction?: {
+    action: "void" | "edit";
+    author: { username: string; displayName: string | null };
+    date: string;
+    original: {
+      qty: number;
+      date: string;
+      licensePlate?: string;
+      reason?: string;
+      name?: string;
+      code?: string;
+      unit?: string;
+    };
+  };
 };
 
 // Маппинг сырой строки users → публичный User.

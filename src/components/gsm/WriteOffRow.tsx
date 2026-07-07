@@ -50,7 +50,7 @@ const WriteOffRow: React.FC<WriteOffRowProps> = ({
     <div className="bg-white p-5 rounded-lg border border-gray-200 relative group transition-all">
       <div className="grid grid-cols-1 sm:grid-cols-12 gap-5">
         {/* Дата */}
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-3">
           <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
             Дата
           </label>
@@ -123,7 +123,7 @@ const WriteOffRow: React.FC<WriteOffRowProps> = ({
         </div>
 
         {/* Причина */}
-        <div className="sm:col-span-4">
+        <div className="sm:col-span-3">
           <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
             Причина
           </label>

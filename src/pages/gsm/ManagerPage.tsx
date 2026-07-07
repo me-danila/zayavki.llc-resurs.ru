@@ -1,9 +1,12 @@
 // Страница менеджера (дизайн-правки этого раунда). Контракт пропсов: { user; onLoggedOut }.
 // Единый <GsmHeader/> (без «УЧЁТ ГСМ» и даты). Секции:
 // (1) приход (ReceiptForm) — видим всегда; (2) «Остатки по участкам» — в CollapsibleSection
-// (StockList scope='manager'); (3) «Сотрудники участков» — в CollapsibleSection с кнопкой-плюс
-// в заголовке, раскрывающей форму нового сотрудника внутри EmployeeAdmin (showForm).
-// Данные lots — на mount и после прихода. Главную (AppHeader) не трогаем.
+// (StockTable: data-table с поиском/фильтрами, `…`-меню строк — история inline,
+// действия (перемещение/правка/сторно прихода) — в модалках; onChanged=loadLots);
+// перемещение — <Modal/> с TransferForm frameless; (3) «Сотрудники участков» — в
+// CollapsibleSection с кнопкой-плюс в заголовке, раскрывающей форму нового сотрудника
+// внутри EmployeeAdmin (showForm). Данные lots — на mount, после прихода и корректировок.
+// Главную (AppHeader) не трогаем. У механика — тот же StockTable (scope='worker').
 
 import React from 'react';
 import { Loader2, UserPlus, Plus } from 'lucide-react';
@@ -12,8 +15,9 @@ import * as api from '../../lib/gsmApi';
 import GsmHeader from '../../components/gsm/GsmHeader';
 import CollapsibleSection from '../../components/gsm/CollapsibleSection';
 import ReceiptForm from '../../components/gsm/ReceiptForm';
-import StockList from '../../components/gsm/StockList';
+import StockTable from '../../components/gsm/StockTable';
 import TransferForm from '../../components/gsm/TransferForm';
+import Modal from '../../components/gsm/Modal';
 import EmployeeAdmin from '../../components/gsm/EmployeeAdmin';
 import SiteAdmin from '../../components/gsm/SiteAdmin';
 
@@ -87,27 +91,34 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
           {lotsError && (
             <p className="py-2 text-xs text-red-500">Не удалось загрузить остатки.</p>
           )}
-          {/* Форма перемещения выбранной партии (любой участок — менеджер). */}
-          {transferLot && (
-            <div className="mb-4">
-              <TransferForm
-                key={transferLot.id}
-                lot={transferLot}
-                sites={activeSites}
-                onDone={handleTransferDone}
-                onCancel={() => setTransferLot(null)}
-              />
-            </div>
-          )}
           {lots !== null && !lotsError && (
-            <StockList
+            <StockTable
               lots={lots}
               scope="manager"
               onTransfer={setTransferLot}
-              onHistory={() => {}}
+              onChanged={loadLots}
             />
           )}
         </CollapsibleSection>
+
+        {/* Модалка перемещения выбранной партии (любой участок — менеджер). */}
+        {transferLot && (
+          <Modal
+            open
+            onClose={() => setTransferLot(null)}
+            title={`Перемещение: ${transferLot.name} (${transferLot.code})`}
+            wide
+          >
+            <TransferForm
+              key={transferLot.id}
+              lot={transferLot}
+              sites={activeSites}
+              onDone={handleTransferDone}
+              onCancel={() => setTransferLot(null)}
+              frameless
+            />
+          </Modal>
+        )}
 
         {/* 3. Участки — сворачиваемая секция с кнопкой-плюс (раскрывает секцию) */}
         <CollapsibleSection

@@ -42,6 +42,24 @@ export type HistoryEvent = {
   // На чей участок ушло (transfer_out) / с чьего пришло (transfer_in).
   counterSiteName?: string;
   author: { username: string; displayName: string | null };
+  // id списания — для кнопок сторно/правки (у прихода есть id партии).
+  writeoffId?: number;
+  // Действующая корректировка (v4): значения события уже эффективные,
+  // original — то, что было ДО корректировки; date — день правки (YYYY-MM-DD).
+  correction?: {
+    action: 'void' | 'edit';
+    author: { username: string; displayName: string | null };
+    date: string;
+    original: {
+      qty: number;
+      date: string;
+      licensePlate?: string;
+      reason?: string;
+      name?: string;
+      code?: string;
+      unit?: string;
+    };
+  };
 };
 
 // Сотрудник (воркер) в списке менеджера — ответ GET /api/gsm/employees.

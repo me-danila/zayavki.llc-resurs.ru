@@ -3,6 +3,7 @@
 
 import { db } from "../db";
 import type { Site } from "./types";
+import { RECEIPT_CORR_JOIN, RECEIPT_NOT_VOIDED, BALANCE_EFF } from "./lots";
 
 // Порог "ненулевого остатка" партии (как в каноне §writeoff): больше EPS — остаток есть.
 const EPS = 1e-9;
@@ -96,14 +97,15 @@ export function archive(
     .get(id)!;
   if (worker.n > 0) return { ok: false, reason: "has_workers" };
 
-  // Партия с ненулевым остатком: qty_initial - Σ(writeoffs) > EPS.
+  // Партия с ненулевым ЭФФЕКТИВНЫМ остатком (v4: корректировки учтены,
+  // voided-партии не считаются): balance_eff > EPS.
   const stock = db
     .query<{ n: number }, [number, number]>(
       `SELECT COUNT(*) AS n FROM receipts r
+        ${RECEIPT_CORR_JOIN}
         WHERE r.site_id = ?
-          AND r.qty_initial
-              - COALESCE((SELECT SUM(w.qty) FROM writeoffs w WHERE w.receipt_id = r.id), 0)
-              > ?`,
+          AND ${RECEIPT_NOT_VOIDED}
+          AND ${BALANCE_EFF} > ?`,
     )
     .get(id, EPS)!;
   if (stock.n > 0) return { ok: false, reason: "has_stock" };

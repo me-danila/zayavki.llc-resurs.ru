@@ -1,15 +1,16 @@
-// Страница СОТРУДНИКА участка (этап 6). Воркер видит только свой участок (бэк фильтрует
-// /lots по session.siteId). StockList scope='worker' (active сверху, архив под катом) с
-// кнопками «Списать»/«История». «Списать» → WriteOffForm по выбранной партии (selectedLot).
-// После сохранения: закрыть форму, рефетч lots; можно выбрать другой товар (канон §6).
-// История — inline-секция внутри StockList (<LotHistory/>).
+// Страница СОТРУДНИКА участка. Воркер видит только свой участок (бэк фильтрует /lots
+// по session.siteId). Остатки — тот же StockTable, что у менеджера (scope='worker'):
+// таблица на десктопе / карточки на мобилке, поиск, вкладки; без группировки и фильтра
+// по участкам (участок один). `…`-меню строки: «Списать» / «Переместить» / «История»
+// (история read-only). Списание (WriteOffForm) и перемещение (TransferForm) — в модалках.
 
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import GsmHeader from '../../components/gsm/GsmHeader';
-import StockList from '../../components/gsm/StockList';
+import StockTable from '../../components/gsm/StockTable';
 import WriteOffForm from '../../components/gsm/WriteOffForm';
 import TransferForm from '../../components/gsm/TransferForm';
+import Modal from '../../components/gsm/Modal';
 import { getLots, getActiveSites } from '../../lib/gsmApi';
 import type { Lot, Site, User } from '../../lib/gsmTypes';
 
@@ -21,10 +22,10 @@ export interface EmployeePageProps {
 const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
   const [lots, setLots] = React.useState<Lot[] | null>(null);
   const [error, setError] = React.useState(false);
+  // Партия, выбранная для списания / перемещения (открывает соответствующую модалку).
   const [selectedLot, setSelectedLot] = React.useState<Lot | null>(null);
-  // Партия, выбранная для перемещения (открывает TransferForm).
   const [transferLot, setTransferLot] = React.useState<Lot | null>(null);
-  // Активные участки — опции целевого участка перемещения (доступно воркеру через /sites/active).
+  // Активные участки — опции целевого участка перемещения (воркеру доступно /sites/active).
   const [activeSites, setActiveSites] = React.useState<Site[]>([]);
 
   const loadLots = React.useCallback(async () => {
@@ -38,7 +39,7 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
     }
   }, []);
 
-  // Рефетч на mount (паттерн LotHistory: setState только в .then/.catch, с alive-флагом).
+  // Рефетч на mount (setState только в .then/.catch, с alive-флагом).
   React.useEffect(() => {
     let alive = true;
     getLots()
@@ -70,66 +71,23 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
     };
   }, []);
 
-  // Открыть форму списания по выбранной партии (перемещение — закрыть).
-  const handleWriteOff = (lot: Lot) => {
-    setTransferLot(null);
-    setSelectedLot(lot);
-  };
-
-  // Открыть форму перемещения по выбранной партии (списание — закрыть).
-  const handleTransfer = (lot: Lot) => {
-    setSelectedLot(null);
-    setTransferLot(lot);
-  };
-
-  // После успешного перемещения — закрыть форму и обновить остатки.
-  const handleTransferDone = async () => {
-    setTransferLot(null);
-    await loadLots();
-  };
-
-  // История раскрывается внутри StockList; коллбек обязателен по контракту StockListProps.
-  const handleHistory = () => {
-    /* StockList сам рендерит inline-историю; здесь ничего не требуется */
-  };
-
-  // После сохранения серии — закрыть форму и обновить остатки (можно выбрать другой товар).
-  const handleSaved = async () => {
+  // После сохранения серии списаний — закрыть модалку и обновить остатки.
+  const handleSaved = React.useCallback(async () => {
     setSelectedLot(null);
     await loadLots();
-  };
+  }, [loadLots]);
 
-  const handleCancel = () => {
-    setSelectedLot(null);
-  };
+  // После успешного перемещения — закрыть модалку и обновить остатки.
+  const handleTransferDone = React.useCallback(async () => {
+    setTransferLot(null);
+    await loadLots();
+  }, [loadLots]);
 
   return (
-    <div className="min-h-screen bg-[#F9FAFB] py-8 px-4 font-sans">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <GsmHeader user={user} onLogout={onLoggedOut} />
+    <div className="min-h-screen bg-[#F9FAFB] font-sans">
+      <GsmHeader user={user} onLogout={onLoggedOut} />
 
-        {/* Форма списания выбранной партии */}
-        {selectedLot && (
-          <WriteOffForm
-            key={selectedLot.id}
-            lot={selectedLot}
-            onSaved={handleSaved}
-            onCancel={handleCancel}
-          />
-        )}
-
-        {/* Форма перемещения выбранной партии */}
-        {transferLot && (
-          <TransferForm
-            key={transferLot.id}
-            lot={transferLot}
-            sites={activeSites}
-            onDone={handleTransferDone}
-            onCancel={() => setTransferLot(null)}
-          />
-        )}
-
-        {/* Список партий участка */}
+      <div className="max-w-5xl mx-auto space-y-6 py-4 px-4 sm:py-8 sm:px-6 lg:px-8">
         {lots === null ? (
           <div className="flex items-center gap-2 py-10 text-sm text-gray-400">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -146,22 +104,53 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
               Повторить
             </button>
           </div>
-        ) : lots.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-gray-200 bg-white py-10 text-gray-400">
-            <p className="text-sm font-bold uppercase tracking-wide">
-              На вашем участке нет товаров
-            </p>
-          </div>
         ) : (
-          <StockList
+          <StockTable
             lots={lots}
             scope="worker"
-            onWriteOff={handleWriteOff}
-            onTransfer={handleTransfer}
-            onHistory={handleHistory}
+            onWriteOff={setSelectedLot}
+            onTransfer={setTransferLot}
+            onChanged={loadLots}
           />
         )}
       </div>
+
+      {/* Модалка списания выбранной партии */}
+      {selectedLot && (
+        <Modal
+          open
+          onClose={() => setSelectedLot(null)}
+          title={`Списание: ${selectedLot.name} (${selectedLot.code})`}
+          wide
+        >
+          <WriteOffForm
+            key={selectedLot.id}
+            lot={selectedLot}
+            onSaved={handleSaved}
+            onCancel={() => setSelectedLot(null)}
+            frameless
+          />
+        </Modal>
+      )}
+
+      {/* Модалка перемещения выбранной партии */}
+      {transferLot && (
+        <Modal
+          open
+          onClose={() => setTransferLot(null)}
+          title={`Перемещение: ${transferLot.name} (${transferLot.code})`}
+          wide
+        >
+          <TransferForm
+            key={transferLot.id}
+            lot={transferLot}
+            sites={activeSites}
+            onDone={handleTransferDone}
+            onCancel={() => setTransferLot(null)}
+            frameless
+          />
+        </Modal>
+      )}
     </div>
   );
 };

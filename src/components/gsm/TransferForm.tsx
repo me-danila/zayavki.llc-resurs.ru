@@ -5,6 +5,9 @@
 // дата (type=date; min=lot.receivedDate, max=сегодня; дефолт сегодня).
 // Сабмит → transferLot(lot.id,{toSiteId,qty,date}); 409 exceeds → «Больше остатка»;
 // 400 → «Проверьте участок/дату»; success → onDone().
+// frameless=true — вариант для модалки (ManagerPage): без своей рамки/фона и без
+// шапки с крестиком (их даёт Modal), вместо шапки — строка «Остаток: …».
+// Дефолт (false) — прежний инлайн-вид, как у сотрудника (EmployeePage).
 
 import React from 'react';
 import { ArrowRightLeft, X } from 'lucide-react';
@@ -20,6 +23,7 @@ export interface TransferFormProps {
   sites: Site[];
   onDone: () => void;
   onCancel: () => void;
+  frameless?: boolean;
 }
 
 // Кол-во без хвостовых нулей: 12.500 → 12.5.
@@ -35,6 +39,7 @@ const TransferForm: React.FC<TransferFormProps> = ({
   sites,
   onDone,
   onCancel,
+  frameless = false,
 }) => {
   const [siteName, setSiteName] = React.useState('');
   const [qtyRaw, setQtyRaw] = React.useState('');
@@ -106,47 +111,53 @@ const TransferForm: React.FC<TransferFormProps> = ({
   return (
     <form
       onSubmit={onSubmit}
-      className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 sm:p-5 space-y-4"
+      className={
+        frameless
+          ? 'space-y-4'
+          : 'rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 sm:p-5 space-y-4'
+      }
     >
-      {/* Шапка */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-gray-700">
-          <ArrowRightLeft className="w-5 h-5 text-gray-400" />
-          <h2 className="text-sm font-bold uppercase tracking-wide">
-            Перемещение: {lot.name}{' '}
-            <span className="text-gray-400">({lot.code})</span> — остаток{' '}
-            {fmtQty(lot.balance)} {lot.unit}
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="p-1 text-gray-300 hover:text-gray-600 transition-colors"
-          title="Отмена"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="bg-white p-5 rounded-lg border border-gray-200">
-        <div className="grid grid-cols-1 sm:grid-cols-12 gap-5">
-          {/* Дата — первой ячейкой */}
-          <div className="sm:col-span-2">
-            <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
-              Дата
-            </label>
-            <input
-              type="date"
-              min={lot.receivedDate}
-              max={todayMsk()}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="resource-input text-sm"
-            />
+      {/* Шапка — только в инлайн-варианте (в модалке заголовок и крестик даёт Modal) */}
+      {!frameless && (
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 text-gray-700">
+            <ArrowRightLeft className="w-5 h-5 text-gray-400" />
+            <h2 className="text-sm font-bold uppercase tracking-wide">
+              Перемещение: {lot.name}{' '}
+              <span className="text-gray-400">({lot.code})</span> — остаток{' '}
+              {fmtQty(lot.balance)} {lot.unit}
+            </h2>
           </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="p-1 text-gray-300 hover:text-gray-600 transition-colors"
+            title="Отмена"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+      {frameless && (
+        <p className="text-[11px] uppercase font-bold text-gray-400">
+          Остаток: {fmtQty(lot.balance)} {lot.unit}
+        </p>
+      )}
 
+      <div
+        className={
+          frameless ? '' : 'bg-white p-5 rounded-lg border border-gray-200'
+        }
+      >
+        {/* В модалке (frameless) — чистый грид: участок на всю ширину, ниже
+            дата/кол-во/остаток. В инлайне — прежняя строка на 12 колонок. */}
+        <div
+          className={
+            frameless ? 'space-y-4' : 'grid grid-cols-1 sm:grid-cols-12 gap-5'
+          }
+        >
           {/* Целевой участок */}
-          <div className="sm:col-span-5">
+          <div className={frameless ? '' : 'sm:col-span-5 sm:order-2'}>
             <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
               Участок назначения
             </label>
@@ -160,59 +171,102 @@ const TransferForm: React.FC<TransferFormProps> = ({
             />
           </div>
 
-          {/* Количество */}
-          <div className="sm:col-span-3">
-            <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
-              Количество
-            </label>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={qtyRaw}
-              onChange={(e) => setQtyRaw(e.target.value)}
-              className="resource-input text-sm"
-              placeholder="0"
-            />
-          </div>
+          <div
+            className={
+              frameless
+                ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+                : 'contents'
+            }
+          >
+            {/* Дата */}
+            <div className={frameless ? '' : 'sm:col-span-2 sm:order-1'}>
+              <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
+                Дата
+              </label>
+              <input
+                type="date"
+                min={lot.receivedDate}
+                max={todayMsk()}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="resource-input text-sm"
+              />
+            </div>
 
-          {/* Остаток после */}
-          <div className="sm:col-span-2">
-            <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
-              Остаток после
-            </label>
-            <input
-              type="text"
-              readOnly
-              tabIndex={-1}
-              value={`${fmtQty(after)} ${lot.unit}`}
-              className={`resource-input text-sm bg-gray-50 ${
-                overBalance ? 'text-red-500 font-bold' : 'text-gray-500'
-              }`}
-            />
+            {/* Количество */}
+            <div className={frameless ? '' : 'sm:col-span-3 sm:order-3'}>
+              <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
+                Количество
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={qtyRaw}
+                onChange={(e) => setQtyRaw(e.target.value)}
+                className="resource-input text-sm"
+                placeholder="0"
+              />
+            </div>
+
+            {/* Остаток после */}
+            <div className={frameless ? '' : 'sm:col-span-2 sm:order-4'}>
+              <label className="text-[11px] uppercase font-bold text-gray-400 mb-1 block">
+                Остаток после
+              </label>
+              <input
+                type="text"
+                readOnly
+                tabIndex={-1}
+                value={`${fmtQty(after)} ${lot.unit}`}
+                className={`resource-input text-sm bg-gray-50 ${
+                  overBalance ? 'text-red-500 font-bold' : 'text-gray-500'
+                }`}
+              />
+            </div>
           </div>
         </div>
       </div>
 
       {formError && <p className="text-xs font-bold text-red-500">{formError}</p>}
 
-      {/* Футер: отмена + переместить */}
-      <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="resource-button-secondary w-full sm:w-auto"
-        >
-          Отмена
-        </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="flex w-full sm:w-auto sm:flex-1 items-center justify-center gap-2 rounded-lg bg-gray-900 px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black disabled:opacity-50"
-        >
-          <ArrowRightLeft className="w-4 h-4" />
-          Переместить
-        </button>
-      </div>
+      {/* Футер. В модалке — кнопки одного размера, справа; в инлайне — прежний вид. */}
+      {frameless ? (
+        <div className="flex flex-col-reverse gap-3 pt-1 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="resource-button-secondary"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-5 py-2 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black disabled:opacity-50"
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            Переместить
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="resource-button-secondary w-full sm:w-auto"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="flex w-full sm:w-auto sm:flex-1 items-center justify-center gap-2 rounded-lg bg-gray-900 px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black disabled:opacity-50"
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            Переместить
+          </button>
+        </div>
+      )}
     </form>
   );
 };

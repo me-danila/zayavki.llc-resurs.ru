@@ -12,14 +12,3 @@ const MSK_FORMATTER = new Intl.DateTimeFormat('sv-SE', {
 export function todayMsk(): string {
   return MSK_FORMATTER.format(new Date());
 }
-
-// Лексикографическое сравнение дат YYYY-MM-DD (формат сортируем как строки).
-// a <= b
-export function dateLte(a: string, b: string): boolean {
-  return a <= b;
-}
-
-// a >= b
-export function dateGte(a: string, b: string): boolean {
-  return a >= b;
-}

@@ -13,6 +13,18 @@
     @apply bg-surface-bg text-surface-text antialiased;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
+
+  /* Кликабельное — с курсором-рукой (кнопки, чекбоксы и их label), disabled — not-allowed. */
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input[type="checkbox"]:not(:disabled),
+  label:has(> input[type="checkbox"]:not(:disabled)) {
+    cursor: pointer;
+  }
 }
 
 @layer components {

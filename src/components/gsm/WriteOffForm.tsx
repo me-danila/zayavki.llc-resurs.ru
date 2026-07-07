@@ -25,6 +25,9 @@ interface WriteOffFormProps {
   lot: Lot;
   onSaved: () => void;
   onCancel: () => void;
+  // frameless — вариант для модалки: без своей рамки/фона и шапки с крестиком
+  // (их даёт Modal), вместо шапки — строка «Остаток: …».
+  frameless?: boolean;
 }
 
 // Кол-во без хвостовых нулей: 12.500 → 12.5.
@@ -33,7 +36,12 @@ const fmtQty = (n: number): string => String(Math.round(n * 1000) / 1000);
 // round3 — тот же приём, что на беке (канон §3.1).
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
-const WriteOffForm: React.FC<WriteOffFormProps> = ({ lot, onSaved, onCancel }) => {
+const WriteOffForm: React.FC<WriteOffFormProps> = ({
+  lot,
+  onSaved,
+  onCancel,
+  frameless = false,
+}) => {
   const [formError, setFormError] = React.useState<string | null>(null);
 
   const methods = useForm<WriteOffData>({
@@ -102,27 +110,37 @@ const WriteOffForm: React.FC<WriteOffFormProps> = ({ lot, onSaved, onCancel }) =
     <FormProvider {...methods}>
       <form
         onSubmit={handleSubmit(onSubmit)}
-        className="rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 sm:p-5 space-y-4"
+        className={
+          frameless
+            ? 'space-y-4'
+            : 'rounded-lg border border-gray-200 bg-[#F9FAFB] p-4 sm:p-5 space-y-4'
+        }
       >
-        {/* Шапка */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2 text-gray-700">
-            <MinusCircle className="w-5 h-5 text-gray-400" />
-            <h2 className="text-sm font-bold uppercase tracking-wide">
-              Списание: {lot.name}{' '}
-              <span className="text-gray-400">({lot.code})</span> — остаток{' '}
-              {fmtQty(lot.balance)} {lot.unit}
-            </h2>
+        {/* Шапка — только в инлайн-варианте (в модалке заголовок/крестик даёт Modal) */}
+        {frameless ? (
+          <p className="text-[11px] uppercase font-bold text-gray-400">
+            Остаток: {fmtQty(lot.balance)} {lot.unit}
+          </p>
+        ) : (
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2 text-gray-700">
+              <MinusCircle className="w-5 h-5 text-gray-400" />
+              <h2 className="text-sm font-bold uppercase tracking-wide">
+                Списание: {lot.name}{' '}
+                <span className="text-gray-400">({lot.code})</span> — остаток{' '}
+                {fmtQty(lot.balance)} {lot.unit}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="p-1 text-gray-300 hover:text-gray-600 transition-colors"
+              title="Отмена"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="p-1 text-gray-300 hover:text-gray-600 transition-colors"
-            title="Отмена"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        )}
 
         {/* Строки */}
         <div className="space-y-4">

@@ -12,6 +12,7 @@ import * as writeoffs from "../repo/writeoffs";
 import * as users from "../repo/users";
 import * as sites from "../repo/sites";
 import * as transfers from "../repo/transfers";
+import * as corrections from "../repo/corrections";
 import { isValidDate } from "../lib/dates";
 
 export const gsmRouter = Router();
@@ -334,6 +335,164 @@ gsmRouter.post(
         return;
       case "exceeds":
         res.status(409).json({ error: "exceeds", balance: result.balance });
+        return;
+    }
+  },
+);
+
+// POST /api/gsm/writeoffs/:id/correct — manager. Сторно/правка списания (v4).
+// Тело: {action:'void'} | {action:'edit', date?, amount?, licensePlate?, reason?}.
+// Маппинг: not_found→404; transfer_locked/already_voided→409;
+// exceeds→409 {error,balance}; invalid→400; ok→201 {id}.
+gsmRouter.post(
+  "/api/gsm/writeoffs/:id/correct",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as {
+      action?: unknown;
+      date?: unknown;
+      amount?: unknown;
+      licensePlate?: unknown;
+      reason?: unknown;
+    };
+
+    let input: corrections.WriteoffCorrectionInput;
+    if (body.action === "void") {
+      input = { action: "void" };
+    } else if (body.action === "edit") {
+      // Передаём только присланные поля; кривые типы репо отвергнет как invalid.
+      input = { action: "edit" };
+      if (body.date !== undefined) {
+        input.date = typeof body.date === "string" ? body.date : "";
+      }
+      if (body.amount !== undefined) {
+        input.amount =
+          typeof body.amount === "number" ? body.amount : Number(body.amount);
+      }
+      if (body.licensePlate !== undefined) {
+        input.licensePlate =
+          typeof body.licensePlate === "string" ? body.licensePlate : "";
+      }
+      if (body.reason !== undefined) {
+        input.reason = typeof body.reason === "string" ? body.reason : "";
+      }
+    } else {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = corrections.correctWriteoff(id, input, req.user!.id);
+    if (result.ok) {
+      res.status(201).json({ id: result.id });
+      return;
+    }
+
+    switch (result.error) {
+      case "not_found":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "transfer_locked":
+        res.status(409).json({ error: "transfer_locked" });
+        return;
+      case "already_voided":
+        res.status(409).json({ error: "already_voided" });
+        return;
+      case "exceeds":
+        res.status(409).json({ error: "exceeds", balance: result.balance });
+        return;
+      case "invalid":
+        res.status(400).json({ error: "invalid" });
+        return;
+    }
+  },
+);
+
+// POST /api/gsm/receipts/:id/correct — manager. Сторно/правка прихода (партии) (v4).
+// Тело: {action:'void'} | {action:'edit', receivedDate?, name?, code?, unit?, quantity?}.
+// Участок партии НЕ меняется. Маппинг: not_found→404;
+// transfer_locked/already_voided/has_writeoffs→409; exceeds→409 {error,balance};
+// invalid→400; ok→201 {id}.
+gsmRouter.post(
+  "/api/gsm/receipts/:id/correct",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as {
+      action?: unknown;
+      receivedDate?: unknown;
+      name?: unknown;
+      code?: unknown;
+      unit?: unknown;
+      quantity?: unknown;
+    };
+
+    let input: corrections.ReceiptCorrectionInput;
+    if (body.action === "void") {
+      input = { action: "void" };
+    } else if (body.action === "edit") {
+      // Передаём только присланные поля; кривые типы репо отвергнет как invalid.
+      input = { action: "edit" };
+      if (body.receivedDate !== undefined) {
+        input.receivedDate =
+          typeof body.receivedDate === "string" ? body.receivedDate : "";
+      }
+      if (body.name !== undefined) {
+        input.name = typeof body.name === "string" ? body.name : "";
+      }
+      if (body.code !== undefined) {
+        input.code = typeof body.code === "string" ? body.code : "";
+      }
+      if (body.unit !== undefined) {
+        input.unit = typeof body.unit === "string" ? body.unit : "";
+      }
+      if (body.quantity !== undefined) {
+        input.quantity =
+          typeof body.quantity === "number"
+            ? body.quantity
+            : Number(body.quantity);
+      }
+    } else {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = corrections.correctReceipt(id, input, req.user!.id);
+    if (result.ok) {
+      res.status(201).json({ id: result.id });
+      return;
+    }
+
+    switch (result.error) {
+      case "not_found":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "transfer_locked":
+        res.status(409).json({ error: "transfer_locked" });
+        return;
+      case "already_voided":
+        res.status(409).json({ error: "already_voided" });
+        return;
+      case "has_writeoffs":
+        res.status(409).json({ error: "has_writeoffs" });
+        return;
+      case "exceeds":
+        res.status(409).json({ error: "exceeds", balance: result.balance });
+        return;
+      case "invalid":
+        res.status(400).json({ error: "invalid" });
         return;
     }
   },
