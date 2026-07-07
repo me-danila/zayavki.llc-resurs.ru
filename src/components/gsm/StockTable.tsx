@@ -163,17 +163,11 @@ const StockTable: React.FC<StockTableProps> = ({
     }
   }, []);
 
-  // Участки — из данных lots, порядок появления.
+  // Участки — из данных lots, по алфавиту (ru-locale, без учёта регистра).
   const siteOrder = React.useMemo(() => {
-    const order: string[] = [];
     const seen = new Set<string>();
-    for (const lot of lots) {
-      if (!seen.has(lot.siteName)) {
-        seen.add(lot.siteName);
-        order.push(lot.siteName);
-      }
-    }
-    return order;
+    for (const lot of lots) seen.add(lot.siteName);
+    return [...seen].sort((a, b) => a.localeCompare(b, 'ru'));
   }, [lots]);
 
   // Поиск + фильтр участков (счётчики вкладок считаем от этого набора).
@@ -208,9 +202,15 @@ const StockTable: React.FC<StockTableProps> = ({
       if (bucket) bucket.push(lot);
       else bySite.set(lot.siteName, [lot]);
     }
+    // Строки внутри участка — по наименованию (ru-locale), тай-брейк по коду.
+    const byName = (a: Lot, b: Lot) =>
+      a.name.localeCompare(b.name, 'ru') || a.code.localeCompare(b.code, 'ru');
     return siteOrder
       .filter((site) => bySite.has(site))
-      .map((site) => ({ site, rows: bySite.get(site) as Lot[] }));
+      .map((site) => ({
+        site,
+        rows: (bySite.get(site) as Lot[]).slice().sort(byName),
+      }));
   }, [visible, siteOrder]);
 
   const toggleGroup = (site: string) => {
