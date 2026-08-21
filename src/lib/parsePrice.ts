@@ -5,7 +5,7 @@ export const parseOptionalPrice = (value: unknown) => {
     return undefined;
   }
 
-  const compactValue = rawValue.replace(/[\s ]/g, '');
+  const compactValue = rawValue.replace(/[\s\u00A0]/g, '');
   const priceLikeValue = compactValue.replace(/[^\d.,-]/g, '');
 
   if (!priceLikeValue) {

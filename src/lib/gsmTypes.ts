@@ -1,7 +1,25 @@
 // Зеркало бэкенд-контракта §4 (docs/gsm-roadmap.md). Источник истины — сервер.
 // Эти типы — то, что приходит/уходит по /api/gsm/*.
 
-export type Role = 'manager' | 'worker';
+export type Role = 'superadmin' | 'manager' | 'worker';
+
+// Права матрицы RBAC (server/repo/types.ts). Супер-админ имеет все неявно.
+export const ALL_PERMISSIONS = [
+  'sites.manage',
+  'users.manage',
+  'access.manage',
+  'initiators.manage',
+] as const;
+
+export type Permission = (typeof ALL_PERMISSIONS)[number];
+
+// Человекочитаемые подписи галочек в матрице прав.
+export const PERMISSION_LABELS: Record<Permission, string> = {
+  'sites.manage': 'Участки',
+  'users.manage': 'Сотрудники',
+  'access.manage': 'Доступы к участкам',
+  'initiators.manage': 'Инициаторы',
+};
 
 // Управляемый участок (раньше был статичный LOTS). active=false → архивный (is_active=0).
 export type Site = {
@@ -17,6 +35,31 @@ export type User = {
   role: Role;
   siteId: number | null;
   siteName: string | null;
+  // Эффективные права (у супер-админа — все) и область видимости участков
+  // (null = все участки). Приходят в ответах /login и /me.
+  permissions: Permission[];
+  siteIds: number[] | null;
+};
+
+// Строка админки пользователей (GET /users).
+export type AdminUser = {
+  id: number;
+  username: string;
+  displayName: string | null;
+  role: Role;
+  siteId: number | null;
+  siteName: string | null;
+  active: boolean;
+  permissions: Permission[];
+  siteIds: number[];
+};
+
+// Инициатор заявки (справочник в БД, GET /api/initiators публично).
+export type Initiator = {
+  id: number;
+  name: string;
+  position: string;
+  active: boolean;
 };
 
 export type Lot = {

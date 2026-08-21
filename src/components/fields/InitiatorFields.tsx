@@ -2,6 +2,7 @@ import React from 'react';
 import { useFormContext, Controller } from 'react-hook-form';
 import type { FormData } from '../../types';
 import { INITIATORS } from '../../data/initiatorData';
+import { getPublicInitiators } from '../../lib/gsmApi';
 import { Combobox } from '../ui/Combobox';
 
 export const InitiatorFields: React.FC = () => {
@@ -13,8 +14,29 @@ export const InitiatorFields: React.FC = () => {
     formState: { errors },
   } = useFormContext<FormData>();
 
+  // Справочник живёт в БД (ведётся в /gsm под правом initiators.manage).
+  // Статический список остаётся фолбэком: форма заявки не должна ломаться,
+  // если API недоступен.
+  const [initiators, setInitiators] = React.useState(INITIATORS);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getPublicInitiators()
+      .then(list => {
+        if (!cancelled && list.length) {
+          setInitiators(list.map(i => ({ name: i.name, position: i.position })));
+        }
+      })
+      .catch(() => {
+        // молча — остаёмся на статическом списке
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const initiatorName = watch('initiatorName');
-  const matchingInitiator = INITIATORS.find(i => i.name === initiatorName);
+  const matchingInitiator = initiators.find(i => i.name === initiatorName);
   const isPositionReadonly = !!matchingInitiator;
 
   // Подставляем должность, когда инициатор выбран из списка
@@ -33,7 +55,7 @@ export const InitiatorFields: React.FC = () => {
           control={control}
           render={({ field }) => (
             <Combobox
-              options={INITIATORS.map(i => i.name)}
+              options={initiators.map(i => i.name)}
               value={field.value}
               onChange={field.onChange}
               placeholder="Иванов И.И."

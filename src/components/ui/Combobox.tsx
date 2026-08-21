@@ -12,6 +12,8 @@ interface ComboboxProps {
   placeholder?: string
   emptyMessage?: string
   allowCustom?: boolean
+  // Только чтение: поле недоступно для ввода и не открывает список.
+  disabled?: boolean
 }
 
 export function Combobox({
@@ -21,6 +23,7 @@ export function Combobox({
   placeholder = "Выберите...",
   emptyMessage = "Ничего не найдено.",
   allowCustom = true,
+  disabled = false,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState("")
@@ -37,6 +40,7 @@ export function Combobox({
   }, [search, fuse, options])
 
   const handleOpenChange = (newOpen: boolean) => {
+    if (disabled) return
     if (newOpen && !open) {
       setSearch(value || "")
     }
@@ -54,6 +58,7 @@ export function Combobox({
         <div className="relative w-full">
           <input
             type="text"
+            disabled={disabled}
             className="flex h-10 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-gray-500 focus:outline-none focus:border-primary-resource focus:ring-2 focus:ring-primary-resource/20 disabled:cursor-not-allowed disabled:opacity-50 pr-8 transition-all"
             placeholder={placeholder}
             value={open ? search : (value || "")}

@@ -197,3 +197,68 @@ server/auth/rateLimit.ts loginLimiter(key):boolean
 - Паттерн `useFieldArray` из `ItemsSection`/`ItemRow` — копировать как шаблон строк (имя поля `rows`).
 - Стили: `.resource-input`, primary `#FFCF00`, контейнеры карточек из `ZayavkaPage`/`ItemRow` — переиспользовать.
 - Данные: `LOTS` (`src/data/lotData.tsx`), `LICENSE_PLATES` (`src/data/licenceNumberData.tsx`). Массив `SITES` в `constants.ts` НЕ использовать.
+
+## 8. RBAC v5: супер-админ, права и доступы к участкам
+
+**Роли.** `superadmin` | `manager` | `worker`. Супер-админ создаётся не через UI, а из
+`.env` (`SUPERADMIN_USERNAME` / `SUPERADMIN_PASSWORD` / `SUPERADMIN_DISPLAY_NAME`) —
+идемпотентно при каждом старте (`server/auth/superadmin.ts`). Одинаковый `.env`
+локально и на проде = один и тот же аккаунт. Пароль с `#` — в двойных кавычках,
+иначе dotenv обрежет значение.
+
+**Права (`user_permissions`).** Выдаются ТОЛЬКО менеджерам и ТОЛЬКО супер-админом:
+
+| Право | Что разрешает |
+|---|---|
+| `sites.manage` | создавать / переименовывать / архивировать участки |
+| `users.manage` | создавать / править / архивировать менеджеров и механиков |
+| `access.manage` | привязывать сотрудников к участкам |
+| `initiators.manage` | вести справочник инициаторов заявки |
+
+У супер-админа строк в таблице нет — все четыре права подразумеваются неявно
+(`permissions.effectivePermissions`).
+
+**Область видимости (`user_sites`).** superadmin → все участки (`allowedSiteIds` = null);
+manager → только выданные; worker → его `users.site_id`. Фильтр применяется в
+`GET /sites`, `/sites/active`, `/lots`, `/lots/:id/history` и гардами на запись:
+приход, перемещение (источник и цель), корректировки, создание/правка сотрудников.
+Чужой участок на чтение — 404 (маскировка), на запись — 403 `forbidden_site`.
+Менеджер, создавший участок, автоматически получает к нему доступ.
+
+**Миграция v4 → v5.** Rebuild `users` (CHECK с `superadmin`), новые таблицы
+`user_sites` / `user_permissions` / `initiators`, сид справочника инициаторов из
+бывшего хардкода `src/data/initiatorData.tsx`. Одноразовый бэкфилл: существующим
+менеджерам выдаются `sites.manage` + `users.manage` + `access.manage` и доступ ко
+ВСЕМ участкам — иначе прод после деплоя потерял бы уже работавший функционал.
+`initiators.manage` не бэкфиллится: возможность новая.
+
+**Новые роуты.** `GET /users`, `POST /managers`, `PATCH|DELETE /users/:id`,
+`POST /users/:id/restore`, `PUT /users/:id/sites` (access.manage),
+`PUT /users/:id/permissions` (только superadmin), `PATCH /sites/:id`,
+CRUD `/initiators` (initiators.manage) и ПУБЛИЧНЫЙ `GET /api/initiators`
+(форма заявки на «/» открыта без авторизации; отдаёт только активных).
+
+## 9. Навигация менеджера/админа: разделы вместо сворачиваемых секций
+
+Страница менеджера была одним экраном с `CollapsibleSection`; теперь каждый раздел —
+отдельный маршрут, а внутри страницы контент виден сразу (формы создания больше не
+прячутся за «+»).
+
+| Маршрут | Раздел | Право |
+|---|---|---|
+| `/gsm` | Приход ГСМ | — |
+| `/gsm/stock` | Остатки по участкам | — |
+| `/gsm/sites` | Участки | `sites.manage` |
+| `/gsm/staff` | Сотрудники (переключатель Механики / Менеджеры) | `users.manage` |
+| `/gsm/initiators` | Инициаторы заявки | `initiators.manage` |
+
+Роутинг — свой мини-роутер `src/lib/router.ts` (History API + `useSyncExternalStore`),
+без react-router: `navigate()`, `useRoute()`, `linkHandler()` для `<a>`. Прямое открытие
+и F5 работают за счёт SPA-fallback сервера. Раздел без нужного права не появляется в
+навигации, а прямой заход на него отдаёт приход (`ManagerPage` сверяет путь с
+`visibleNavItems`); сервер всё равно перепроверяет каждый роут.
+
+Навигация живёт в той же строке `GsmHeader` (слот `nav`): на sm+ — текстовые
+кнопки-вкладки, на мобильном — компактный `<select>`, а имя пользователя скрывается,
+чтобы выпадашке хватило ширины. Страница механика (`EmployeePage`) не менялась:
+без слота `nav` хедер выглядит как раньше.

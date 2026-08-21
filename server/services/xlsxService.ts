@@ -24,9 +24,6 @@ interface WebhookPayload {
 const COLOR_HEADER_BG = "1F6B4A"; // тёмно-зелёный заголовок таблицы
 const COLOR_ROW_BG   = "FFF9DC"; // светло-кремовые строки
 const COLOR_WHITE    = "FFFFFF";
-const COLOR_BLACK    = "000000";
-
-const TOTAL_COLS = 6; // A–F
 
 function borderAll(): Partial<ExcelJS.Borders> {
   const side: ExcelJS.BorderStyle = "thin";
@@ -36,12 +33,6 @@ function borderAll(): Partial<ExcelJS.Borders> {
     bottom: { style: side },
     right: { style: side },
   };
-}
-
-function applyBorder(row: ExcelJS.Row, from: number, to: number) {
-  for (let c = from; c <= to; c++) {
-    row.getCell(c).border = borderAll();
-  }
 }
 
 export async function createXlsx(payload: WebhookPayload): Promise<string> {

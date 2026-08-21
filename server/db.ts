@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -47,13 +47,13 @@ CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL CHECK (role IN ('manager','worker')),
+  role          TEXT NOT NULL CHECK (role IN ('superadmin','manager','worker')),
   site_id       INTEGER REFERENCES sites(id),
   display_name  TEXT,
   is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   created_by    INTEGER REFERENCES users(id),
-  CHECK ((role='manager' AND site_id IS NULL) OR (role='worker' AND site_id IS NOT NULL))
+  CHECK ((role IN ('manager','superadmin') AND site_id IS NULL) OR (role='worker' AND site_id IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -150,6 +150,144 @@ CREATE TRIGGER IF NOT EXISTS corrections_no_update BEFORE UPDATE ON corrections 
 CREATE TRIGGER IF NOT EXISTS corrections_no_delete BEFORE DELETE ON corrections BEGIN SELECT RAISE(ABORT,'append-only'); END;
 `;
 
+// RBAC v5: участки-доступы, матрица прав, справочник инициаторов.
+// Создаём ПОСЛЕ rebuild users (иначе FK повиснут на дропнутой таблице).
+const RBAC_DDL = `
+-- Доступ пользователя к участкам (many-to-many). Для менеджеров — область видимости
+-- всех операций ГСМ; у воркера область по-прежнему одна: users.site_id.
+CREATE TABLE IF NOT EXISTS user_sites (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_id    INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  granted_by INTEGER REFERENCES users(id),
+  PRIMARY KEY (user_id, site_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sites_site ON user_sites(site_id);
+
+-- Матрица прав. Право выдаётся ТОЛЬКО менеджеру и ТОЛЬКО супер-админом.
+-- У супер-админа прав в таблице нет — все четыре подразумеваются неявно.
+CREATE TABLE IF NOT EXISTS user_permissions (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission TEXT NOT NULL CHECK (permission IN ('sites.manage','users.manage','access.manage','initiators.manage')),
+  granted_at TEXT NOT NULL DEFAULT (datetime('now')),
+  granted_by INTEGER REFERENCES users(id),
+  PRIMARY KEY (user_id, permission)
+);
+
+-- Справочник инициаторов заявки (бывший хардкод src/data/initiatorData.tsx).
+-- Архив обратим (is_active 0/1) — как у sites.
+CREATE TABLE IF NOT EXISTS initiators (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  position   TEXT NOT NULL,
+  is_active  INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_by INTEGER REFERENCES users(id)
+);
+`;
+
+// Начальный справочник инициаторов — перенос хардкода из src/data/initiatorData.tsx.
+// Засевается ТОЛЬКО в пустую таблицу: удалённые админом записи не воскресают.
+const DEFAULT_INITIATORS: Array<[string, string]> = [
+  ["Коржавов Анатолиий Борисович", "Главный механик"],
+  ["Редько Александр Сергеевич", "Механик"],
+  ["Евсеев Сергей Петрович", "Механик"],
+  ["Павлов Александр Васильевич", "Начальник участка"],
+  ["Рейтер Василий Владимирович", "Механик"],
+  ["Самсонов Александр Львович", "Механик"],
+  ["Полуэктов Петр Витальевич", "Механик"],
+  ["Волков Алексей Владимирович", "Механик"],
+  ["Никулин Александр Викторович", "Механик"],
+  ["Соболев Евгений Александрович", "Начальник участка"],
+  ["Железнев Александр Геннадьевич", "Механик"],
+  ["Сенников Александр Ильич", "Механик"],
+  ["Ермилов Александр Николаевич", "Механик"],
+  ["Жуковский Геннадий Павлович", "Механик"],
+  ["Трубкин Иван Васильевич", "Механик"],
+];
+
+function seedInitiators() {
+  const { n } = db
+    .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM initiators")
+    .get()!;
+  if (n > 0) return;
+  const ins = db.query<null, [string, string]>(
+    "INSERT OR IGNORE INTO initiators (name, position) VALUES (?, ?)",
+  );
+  for (const [name, position] of DEFAULT_INITIATORS) ins.run(name, position);
+}
+
+// Миграция v4 → v5: роль 'superadmin' в CHECK таблицы users.
+// SQLite не умеет ALTER CHECK — только rebuild таблицы (как в migrateToV2).
+function migrateUsersRoleCheck() {
+  const row = db
+    .query<{ sql: string }, []>(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'",
+    )
+    .get();
+  if (!row || row.sql.includes("superadmin")) return; // уже v5
+
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      CREATE TABLE users_v5 (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
+        role          TEXT NOT NULL CHECK (role IN ('superadmin','manager','worker')),
+        site_id       INTEGER REFERENCES sites(id),
+        display_name  TEXT,
+        is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        created_by    INTEGER REFERENCES users(id),
+        CHECK ((role IN ('manager','superadmin') AND site_id IS NULL) OR (role='worker' AND site_id IS NOT NULL))
+      );
+      INSERT INTO users_v5 (id, username, password_hash, role, site_id, display_name, is_active, created_at, created_by)
+        SELECT id, username, password_hash, role, site_id, display_name, is_active, created_at, created_by FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_v5 RENAME TO users;
+    `);
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    db.exec("PRAGMA foreign_keys = ON");
+    throw e;
+  }
+  db.exec("PRAGMA foreign_keys = ON");
+
+  const violations = db
+    .query<{ table: string }, []>("PRAGMA foreign_key_check")
+    .all();
+  if (violations.length) {
+    throw new Error(
+      `[db] миграция v5: нарушения FK после rebuild: ${JSON.stringify(violations)}`,
+    );
+  }
+}
+
+// Бэкфилл прав для УЖЕ СУЩЕСТВУЮЩИХ менеджеров (одноразово, при переходе на v5).
+// До v5 любой менеджер мог вести участки и сотрудников и видел все участки —
+// сохраняем это поведение, иначе прод после деплоя теряет функционал.
+// initiators.manage НЕ выдаём: возможность новая, по умолчанию только у супер-админа.
+function backfillManagerGrants() {
+  db.exec(`
+    INSERT OR IGNORE INTO user_permissions (user_id, permission)
+      SELECT u.id, p.permission
+        FROM users u
+        CROSS JOIN (
+          SELECT 'sites.manage' AS permission
+          UNION ALL SELECT 'users.manage'
+          UNION ALL SELECT 'access.manage'
+        ) p
+       WHERE u.role = 'manager';
+
+    INSERT OR IGNORE INTO user_sites (user_id, site_id)
+      SELECT u.id, s.id FROM users u CROSS JOIN sites s WHERE u.role = 'manager';
+  `);
+}
+
 function hasColumn(table: string, column: string): boolean {
   const cols = db
     .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
@@ -157,7 +295,13 @@ function hasColumn(table: string, column: string): boolean {
   return cols.some((c) => c.name === column);
 }
 
+// Засеваем ТОЛЬКО пустую таблицу. Иначе переименованный (v5) или архивированный
+// дефолтный участок воскресал бы дублем при каждом старте сервера.
 function seedSites() {
+  const { n } = db
+    .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sites")
+    .get()!;
+  if (n > 0) return;
   const ins = db.query<null, [string]>(
     "INSERT OR IGNORE INTO sites (name) VALUES (?)",
   );
@@ -255,19 +399,28 @@ function migrateToV2() {
 // Создаёт всю схему (таблицы, индексы, триггеры), мигрирует старые БД, фиксирует версию.
 // Идемпотентно: безопасно вызывать повторно.
 export function bootstrap() {
+  const { user_version: prevVersion } = db
+    .query<{ user_version: number }, []>("PRAGMA user_version")
+    .get()!;
+
   // 1. Базовые таблицы (свежие БД получают сразу v2-схему; существующие — без изменений).
   db.exec(BASE_DDL);
   // 2. Участки по умолчанию.
   seedSites();
   // 3. Миграция существующих v1-БД (site TEXT → site_id FK).
   migrateToV2();
-  // 4. Индексы и триггеры (после возможного rebuild таблиц).
+  // 4. Миграция v4→v5: роль superadmin в CHECK users (rebuild таблицы).
+  migrateUsersRoleCheck();
+  // 5. RBAC-таблицы (user_sites / user_permissions / initiators) — после rebuild users.
+  db.exec(RBAC_DDL);
+  // 6. Справочник инициаторов (только в пустую таблицу).
+  seedInitiators();
+  // 7. Одноразовый бэкфилл прав существующим менеджерам при переходе на v5.
+  if (prevVersion < SCHEMA_VERSION) backfillManagerGrants();
+  // 8. Индексы и триггеры (после возможного rebuild таблиц).
   db.exec(INDEXES_TRIGGERS_DDL);
 
-  const { user_version } = db
-    .query<{ user_version: number }, []>("PRAGMA user_version")
-    .get()!;
-  if (user_version < SCHEMA_VERSION) {
+  if (prevVersion < SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
 }

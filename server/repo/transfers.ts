@@ -12,7 +12,7 @@ import { RECEIPT_CORR_JOIN, RECEIPT_NOT_VOIDED, BALANCE_EFF } from "./lots";
 
 export type TransferActor = {
   id: number;
-  role: "manager" | "worker";
+  role: "superadmin" | "manager" | "worker";
   siteId: number | null;
 };
 

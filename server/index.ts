@@ -5,8 +5,10 @@ import { join } from "path";
 import { existsSync } from "fs";
 import { repairRouter } from "./routes/repair";
 import { gsmRouter } from "./routes/gsm";
+import { initiatorsRouter } from "./routes/initiators";
 import { attachUser } from "./auth/middleware";
 import { authRouter } from "./auth/routes";
+import { bootstrapSuperadmin } from "./auth/superadmin";
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -38,6 +40,7 @@ app.use(authRouter);
 // API
 app.use(repairRouter);
 app.use(gsmRouter);
+app.use(initiatorsRouter);
 
 // Статика фронта
 app.use(express.static(PUBLIC_DIR));
@@ -53,6 +56,9 @@ app.get(/.*/, (req, res, next) => {
       .send("Фронт не собран. Запустите: bun run build (vite build → dist).");
   }
 });
+
+// Аккаунт супер-админа из .env: идемпотентно при каждом старте (см. auth/superadmin.ts).
+await bootstrapSuperadmin();
 
 app.listen(PORT, () => {
   console.log(`App listening on port ${PORT}`);

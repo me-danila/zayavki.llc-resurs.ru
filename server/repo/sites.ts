@@ -21,15 +21,27 @@ function toSite(row: SiteRow): Site {
 
 // Список участков. По умолчанию все (активные+архивные); includeArchived:false — только активные.
 // Сортировка: активные сверху (is_active=1 раньше 0), внутри — по name (NOCASE).
-export function list(opts?: { includeArchived?: boolean }): Site[] {
+// onlyIds — область видимости пользователя (null = все участки, см. repo/permissions.ts).
+export function list(opts?: {
+  includeArchived?: boolean;
+  onlyIds?: number[] | null;
+}): Site[] {
   const includeArchived = opts?.includeArchived ?? true;
-  const where = includeArchived ? "" : "WHERE is_active = 1";
+  const onlyIds = opts?.onlyIds ?? null;
+  const conds: string[] = [];
+  if (!includeArchived) conds.push("is_active = 1");
+  if (onlyIds !== null) {
+    // Пустой список доступов → пустой результат (а не «все»).
+    if (onlyIds.length === 0) return [];
+    conds.push(`id IN (${onlyIds.map(() => "?").join(",")})`);
+  }
+  const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
   const rows = db
-    .query<SiteRow, []>(
+    .query<SiteRow, number[]>(
       `SELECT id, name, is_active FROM sites ${where}
        ORDER BY is_active DESC, name COLLATE NOCASE`,
     )
-    .all();
+    .all(...(onlyIds ?? []));
   return rows.map(toSite);
 }
 
@@ -118,4 +130,27 @@ export function archive(
 export function restore(id: number): boolean {
   const res = db.run("UPDATE sites SET is_active = 1 WHERE id = ?", [id]);
   return res.changes > 0;
+}
+
+// Переименование участка. Уникальность имени проверяем в JS (Unicode-aware),
+// как в create(): SQLite COLLATE NOCASE фолдит только латиницу.
+export function rename(
+  id: number,
+  name: string,
+): { ok: true } | { ok: false; reason: "not_found" | "exists" } {
+  const trimmed = name.trim();
+  const current = db
+    .query<{ name: string }, [number]>("SELECT name FROM sites WHERE id = ?")
+    .get(id);
+  if (!current) return { ok: false, reason: "not_found" };
+
+  const key = trimmed.toLowerCase();
+  const clash = db
+    .query<{ id: number; name: string }, []>("SELECT id, name FROM sites")
+    .all()
+    .some((s) => s.id !== id && s.name.toLowerCase() === key);
+  if (clash) return { ok: false, reason: "exists" };
+
+  db.run("UPDATE sites SET name = ? WHERE id = ?", [trimmed, id]);
+  return { ok: true };
 }

@@ -1,4 +1,4 @@
-// Управление участками (manager). Список (getSites): активные сверху обычные с
+// Управление участками (право sites.manage). Список (getSites): активные сверху обычные с
 // кнопкой «Архивировать», архивные ниже — замьючены с «Восстановить». Форма создания
 // (поле «Название участка» + «Добавить» → createSite; 409 → «Участок уже есть»,
 // 400 → «Введите название»). archiveSite: 409 → причина (has_stock / has_workers).
@@ -9,13 +9,16 @@ import React from 'react';
 import {
   Archive,
   ArchiveRestore,
+  Check,
   Loader2,
   MapPin,
+  Pencil,
   Plus,
+  X,
 } from 'lucide-react';
 import * as api from '../../lib/gsmApi';
 import { ApiError } from '../../lib/gsmApi';
-import type { Site } from '../../lib/gsmTypes';
+import { useRemoteList } from '../../lib/useRemoteList';
 
 export interface SiteAdminProps {
   // Вызывается после любого успешного изменения участков (create/archive/restore),
@@ -38,31 +41,24 @@ function archiveReason(error: unknown): string {
 }
 
 const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged, showForm = false }) => {
-  const [sites, setSites] = React.useState<Site[] | null>(null);
-  const [listError, setListError] = React.useState(false);
+  const {
+    data: sites,
+    error: listError,
+    refetch,
+  } = useRemoteList(React.useCallback(() => api.getSites(), []));
   const [busyId, setBusyId] = React.useState<number | null>(null);
   const [rowError, setRowError] = React.useState<{ id: number; msg: string } | null>(
     null
   );
 
+  // Инлайн-переименование: id редактируемой строки и черновик названия.
+  const [editingId, setEditingId] = React.useState<number | null>(null);
+  const [editName, setEditName] = React.useState('');
+
   // Форма создания.
   const [name, setName] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
-
-  const refetch = React.useCallback(async () => {
-    setListError(false);
-    try {
-      const list = await api.getSites();
-      setSites(list);
-    } catch {
-      setListError(true);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    void refetch();
-  }, [refetch]);
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,6 +101,30 @@ const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged, showForm = false }) =>
       } else {
         setRowError({ id, msg: 'Не удалось архивировать участок.' });
       }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const onRename = async (id: number) => {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setRowError({ id, msg: 'Введите название участка.' });
+      return;
+    }
+    setBusyId(id);
+    setRowError(null);
+    try {
+      await api.renameSite(id, trimmed);
+      setEditingId(null);
+      await refetch();
+      onChanged?.();
+    } catch (err) {
+      const msg =
+        err instanceof ApiError && err.status === 409
+          ? 'Участок с таким названием уже есть.'
+          : 'Не удалось переименовать участок.';
+      setRowError({ id, msg });
     } finally {
       setBusyId(null);
     }
@@ -189,27 +209,65 @@ const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged, showForm = false }) =>
           return (
             <div key={s.id} className={archived ? 'opacity-50' : ''}>
               <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
                   <MapPin
                     className={`w-4 h-4 shrink-0 ${
                       archived ? 'text-gray-300' : 'text-gray-400'
                     }`}
                   />
-                  <span
-                    className={`truncate text-sm font-bold ${
-                      archived ? 'text-gray-400' : 'text-gray-900'
-                    }`}
-                  >
-                    {s.name}
-                  </span>
-                  {archived && (
+                  {editingId === s.id ? (
+                    <input
+                      type="text"
+                      value={editName}
+                      autoFocus
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void onRename(s.id);
+                        if (e.key === 'Escape') setEditingId(null);
+                      }}
+                      className="resource-input h-8 flex-1 text-sm"
+                    />
+                  ) : (
+                    <span
+                      className={`truncate text-sm font-bold ${
+                        archived ? 'text-gray-400' : 'text-gray-900'
+                      }`}
+                    >
+                      {s.name}
+                    </span>
+                  )}
+                  {archived && editingId !== s.id && (
                     <span className="text-[10px] uppercase tracking-wide text-gray-400">
                       в архиве
                     </span>
                   )}
                 </div>
 
-                {archived ? (
+                {editingId === s.id ? (
+                  <div className="flex shrink-0 items-center">
+                    <button
+                      type="button"
+                      onClick={() => void onRename(s.id)}
+                      disabled={busyId === s.id}
+                      title="Сохранить"
+                      className="p-2 text-gray-400 transition-colors hover:text-gray-900 disabled:opacity-50"
+                    >
+                      {busyId === s.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingId(null)}
+                      title="Отмена"
+                      className="p-2 text-gray-300 transition-colors hover:text-gray-700"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : archived ? (
                   <button
                     type="button"
                     onClick={() => onRestore(s.id)}
@@ -224,19 +282,33 @@ const SiteAdmin: React.FC<SiteAdminProps> = ({ onChanged, showForm = false }) =>
                     )}
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => onArchive(s.id)}
-                    disabled={busyId === s.id}
-                    title="Архивировать"
-                    className="p-2 text-gray-300 transition-colors hover:text-gray-700 disabled:opacity-50"
-                  >
-                    {busyId === s.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Archive className="w-4 h-4" />
-                    )}
-                  </button>
+                  <div className="flex shrink-0 items-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(s.id);
+                        setEditName(s.name);
+                        setRowError(null);
+                      }}
+                      title="Переименовать"
+                      className="p-2 text-gray-300 transition-colors hover:text-gray-700"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onArchive(s.id)}
+                      disabled={busyId === s.id}
+                      title="Архивировать"
+                      className="p-2 text-gray-300 transition-colors hover:text-gray-700 disabled:opacity-50"
+                    >
+                      {busyId === s.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Archive className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
               {hasError && (

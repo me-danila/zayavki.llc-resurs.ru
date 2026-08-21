@@ -5,7 +5,13 @@
 // Чужой :id (партия другого участка) → 404, не 403 (не раскрываем существование).
 
 import { Router, type Request, type Response } from "express";
-import { requireAuth, requireManager } from "../auth/middleware";
+import {
+  assertSiteAllowed,
+  requireAuth,
+  requireManager,
+  requirePermission,
+  requireSuperadmin,
+} from "../auth/middleware";
 import * as lots from "../repo/lots";
 import * as receipts from "../repo/receipts";
 import * as writeoffs from "../repo/writeoffs";
@@ -13,6 +19,10 @@ import * as users from "../repo/users";
 import * as sites from "../repo/sites";
 import * as transfers from "../repo/transfers";
 import * as corrections from "../repo/corrections";
+import * as permissions from "../repo/permissions";
+import * as initiators from "../repo/initiators";
+import type { Permission } from "../repo/types";
+import { ALL_PERMISSIONS } from "../repo/types";
 import { isValidDate } from "../lib/dates";
 
 export const gsmRouter = Router();
@@ -24,13 +34,44 @@ function parseId(raw: string): number | null {
   return id;
 }
 
-// GET /api/gsm/sites — manager. Все участки (активные сверху + архивные).
+// v5: может ли текущий пользователь администрировать сотрудника targetId.
+// Супер-админ — кого угодно, кроме себя же. Менеджер с users.manage — только тех,
+// кто связан с его участками; супер-админа не трогает никто. Отказ маскируем 404,
+// чтобы не раскрывать существование чужих учёток (единая конвенция роутов).
+function canManageUser(req: Request, res: Response, targetId: number): boolean {
+  const actor = req.user!;
+  const target = users.getById(targetId);
+  if (!target || target.role === "superadmin" || target.id === actor.id) {
+    res.status(404).json({ error: "not_found" });
+    return false;
+  }
+  const allowed = permissions.allowedSiteIds(actor);
+  if (allowed === null) return true;
+
+  const targetSites =
+    target.role === "worker"
+      ? target.site_id != null
+        ? [target.site_id]
+        : []
+      : permissions.listSiteIds(target.id);
+  if (!targetSites.some((id) => allowed.includes(id))) {
+    res.status(404).json({ error: "not_found" });
+    return false;
+  }
+  return true;
+}
+
+// GET /api/gsm/sites — manager. Участки в области видимости (активные сверху + архивные).
+// v5: менеджер видит только выданные ему участки (user_sites), супер-админ — все.
 gsmRouter.get(
   "/api/gsm/sites",
   requireAuth,
   requireManager,
-  (_req: Request, res: Response): void => {
-    res.status(200).json({ sites: sites.list({ includeArchived: true }) });
+  (req: Request, res: Response): void => {
+    const onlyIds = permissions.allowedSiteIds(req.user!);
+    res
+      .status(200)
+      .json({ sites: sites.list({ includeArchived: true, onlyIds }) });
   },
 );
 
@@ -40,8 +81,11 @@ gsmRouter.get(
 gsmRouter.get(
   "/api/gsm/sites/active",
   requireAuth,
-  (_req: Request, res: Response): void => {
-    res.status(200).json({ sites: sites.list({ includeArchived: false }) });
+  (req: Request, res: Response): void => {
+    const onlyIds = permissions.allowedSiteIds(req.user!);
+    res
+      .status(200)
+      .json({ sites: sites.list({ includeArchived: false, onlyIds }) });
   },
 );
 
@@ -50,7 +94,7 @@ gsmRouter.get(
 gsmRouter.post(
   "/api/gsm/sites",
   requireAuth,
-  requireManager,
+  requirePermission("sites.manage"),
   (req: Request, res: Response): void => {
     const body = (req.body ?? {}) as { name?: unknown };
     const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -64,6 +108,15 @@ gsmRouter.post(
       res.status(409).json({ error: "exists" });
       return;
     }
+    // Менеджер обязан сразу видеть созданный им участок — иначе он пропадёт
+    // из его области видимости. У супер-админа доступ ко всем участкам неявный.
+    if (req.user!.role === "manager") {
+      permissions.setSiteIds(
+        req.user!.id,
+        [...permissions.listSiteIds(req.user!.id), result.id],
+        req.user!.id,
+      );
+    }
     res.status(201).json({ id: result.id });
   },
 );
@@ -73,13 +126,14 @@ gsmRouter.post(
 gsmRouter.post(
   "/api/gsm/sites/:id/archive",
   requireAuth,
-  requireManager,
+  requirePermission("sites.manage"),
   (req: Request, res: Response): void => {
     const id = parseId(req.params.id);
     if (id === null) {
       res.status(404).json({ error: "not_found" });
       return;
     }
+    if (!assertSiteAllowed(req, res, id)) return;
 
     const result = sites.archive(id);
     if (result.ok) {
@@ -105,13 +159,14 @@ gsmRouter.post(
 gsmRouter.post(
   "/api/gsm/sites/:id/restore",
   requireAuth,
-  requireManager,
+  requirePermission("sites.manage"),
   (req: Request, res: Response): void => {
     const id = parseId(req.params.id);
     if (id === null) {
       res.status(404).json({ error: "not_found" });
       return;
     }
+    if (!assertSiteAllowed(req, res, id)) return;
 
     const ok = sites.restore(id);
     if (!ok) {
@@ -122,6 +177,38 @@ gsmRouter.post(
   },
 );
 
+// PATCH /api/gsm/sites/:id — право sites.manage. Переименование участка.
+// {name} → 204; пустое → 400 invalid; дубликат → 409 exists; нет участка → 404.
+gsmRouter.patch(
+  "/api/gsm/sites/:id",
+  requireAuth,
+  requirePermission("sites.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!assertSiteAllowed(req, res, id)) return;
+
+    const body = (req.body ?? {}) as { name?: unknown };
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = sites.rename(id, name);
+    if (result.ok) {
+      res.status(204).end();
+      return;
+    }
+    res.status(result.reason === "exists" ? 409 : 404).json({
+      error: result.reason,
+    });
+  },
+);
+
 // GET /api/gsm/lots — auth.
 // manager: все партии; worker: сервер фильтрует по session.siteId (query игнорируем).
 gsmRouter.get(
@@ -129,10 +216,12 @@ gsmRouter.get(
   requireAuth,
   (req: Request, res: Response): void => {
     const user = req.user!;
+    // Воркер — только свой участок; менеджер — выданные ему (v5); супер-админ — все.
+    const allowed = permissions.allowedSiteIds(user);
     const list =
-      user.role === "manager"
-        ? lots.list({})
-        : lots.list({ siteId: user.siteId ?? 0 });
+      user.role === "worker"
+        ? lots.list({ siteId: user.siteId ?? 0 })
+        : lots.list(allowed === null ? {} : { siteIds: allowed });
     res.status(200).json({ lots: list });
   },
 );
@@ -184,6 +273,8 @@ gsmRouter.post(
         res.status(400).json({ error: "invalid_site" });
         return;
       }
+      // ...и находиться в области видимости пользователя (v5).
+      if (!assertSiteAllowed(req, res, siteId)) return;
       if (!name) {
         res.status(400).json({ error: "invalid_name" });
         return;
@@ -312,6 +403,17 @@ gsmRouter.post(
     const qty = typeof body.qty === "number" ? body.qty : Number(body.qty);
     const date = typeof body.date === "string" ? body.date : "";
 
+    // v5: исходная партия вне области видимости — маскируем под 404 (как чужой :id),
+    // недоступный целевой участок — явный 403 forbidden_site.
+    const sourceLot = lots.getById(id);
+    if (sourceLot && !permissions.canAccessSite(user, sourceLot.siteId)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (Number.isInteger(toSiteId) && !assertSiteAllowed(req, res, toSiteId)) {
+      return;
+    }
+
     const result = transfers.create(id, toSiteId, qty, date, {
       id: user.id,
       role: user.role,
@@ -385,6 +487,13 @@ gsmRouter.post(
       }
     } else {
       res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    // v5: списание чужого участка — 404 (не раскрываем существование).
+    const woSiteId = lots.siteIdOfWriteoff(id);
+    if (woSiteId !== null && !permissions.canAccessSite(req.user!, woSiteId)) {
+      res.status(404).json({ error: "not_found" });
       return;
     }
 
@@ -469,6 +578,13 @@ gsmRouter.post(
       return;
     }
 
+    // v5: партия чужого участка — 404 (не раскрываем существование).
+    const targetLot = lots.getById(id);
+    if (targetLot && !permissions.canAccessSite(req.user!, targetLot.siteId)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
     const result = corrections.correctReceipt(id, input, req.user!.id);
     if (result.ok) {
       res.status(201).json({ id: result.id });
@@ -517,8 +633,9 @@ gsmRouter.get(
       return;
     }
 
-    // Воркер видит только свою партию — чужой участок маскируем под 404.
-    if (user.role === "worker" && result.lot.siteId !== user.siteId) {
+    // Чужой участок маскируем под 404: воркеру — не его site_id, менеджеру —
+    // участок вне выданной ему области видимости (v5).
+    if (!permissions.canAccessSite(user, result.lot.siteId)) {
       res.status(404).json({ error: "not_found" });
       return;
     }
@@ -532,9 +649,16 @@ gsmRouter.get(
 gsmRouter.get(
   "/api/gsm/employees",
   requireAuth,
-  requireManager,
-  (_req: Request, res: Response): void => {
-    const workers = users.listWorkers();
+  requirePermission("users.manage"),
+  (req: Request, res: Response): void => {
+    // v5: менеджер видит только механиков своих участков; супер-админ — всех.
+    const allowed = permissions.allowedSiteIds(req.user!);
+    const workers = users
+      .listWorkers()
+      .filter(
+        (w) =>
+          allowed === null || (w.siteId != null && allowed.includes(w.siteId)),
+      );
     const employees = workers.map((w) => ({
       id: w.id,
       username: w.username,
@@ -552,7 +676,7 @@ gsmRouter.get(
 gsmRouter.post(
   "/api/gsm/employees",
   requireAuth,
-  requireManager,
+  requirePermission("users.manage"),
   async (req: Request, res: Response): Promise<void> => {
     const body = (req.body ?? {}) as {
       username?: unknown;
@@ -581,6 +705,8 @@ gsmRouter.post(
       res.status(400).json({ error: "invalid_site" });
       return;
     }
+    // Привязать механика можно только к участку из своей области видимости (v5).
+    if (!assertSiteAllowed(req, res, siteId)) return;
 
     const result = await users.createOrReactivateWorker({
       username,
@@ -603,13 +729,14 @@ gsmRouter.post(
 gsmRouter.delete(
   "/api/gsm/employees/:id",
   requireAuth,
-  requireManager,
+  requirePermission("users.manage"),
   (req: Request, res: Response): void => {
     const id = parseId(req.params.id);
     if (id === null) {
       res.status(404).json({ error: "not_found" });
       return;
     }
+    if (!canManageUser(req, res, id)) return;
 
     const ok = users.softDeleteWorker(id);
     if (!ok) {
@@ -626,13 +753,14 @@ gsmRouter.delete(
 gsmRouter.post(
   "/api/gsm/employees/:id/restore",
   requireAuth,
-  requireManager,
+  requirePermission("users.manage"),
   (req: Request, res: Response): void => {
     const id = parseId(req.params.id);
     if (id === null) {
       res.status(404).json({ error: "not_found" });
       return;
     }
+    if (!canManageUser(req, res, id)) return;
 
     const ok = users.restoreWorker(id);
     if (!ok) {
@@ -641,6 +769,375 @@ gsmRouter.post(
       return;
     }
 
+    res.status(204).end();
+  },
+);
+
+// --- RBAC v5: администрирование пользователей, прав и доступов ---------------
+
+// GET /api/gsm/users — право users.manage. Все сотрудники в области видимости
+// (менеджеры + механики, активные сверху). Супер-админы видны только супер-админу.
+gsmRouter.get(
+  "/api/gsm/users",
+  requireAuth,
+  requirePermission("users.manage"),
+  (req: Request, res: Response): void => {
+    const scope = permissions.allowedSiteIds(req.user!);
+    res.status(200).json({ users: users.listUsers(scope) });
+  },
+);
+
+// POST /api/gsm/managers — право users.manage. Создание/реактивация менеджера.
+// Тело: {username,password,displayName?,siteIds?}. Участок в users.site_id не пишем —
+// область менеджера задаётся user_sites. Пароль ≥ 6.
+gsmRouter.post(
+  "/api/gsm/managers",
+  requireAuth,
+  requirePermission("users.manage"),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = (req.body ?? {}) as {
+      username?: unknown;
+      password?: unknown;
+      displayName?: unknown;
+      siteIds?: unknown;
+    };
+
+    const username =
+      typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const displayNameRaw =
+      typeof body.displayName === "string" ? body.displayName.trim() : "";
+    const displayName = displayNameRaw ? displayNameRaw : null;
+
+    if (!username) {
+      res.status(400).json({ error: "invalid_username" });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ error: "weak_password" });
+      return;
+    }
+
+    // Выдать можно только те участки, что доступны самому создающему (v5).
+    const requested = Array.isArray(body.siteIds)
+      ? (body.siteIds as unknown[])
+          .map((v) => (typeof v === "number" ? v : Number(v)))
+          .filter((v) => Number.isInteger(v) && v > 0)
+      : [];
+    for (const siteId of requested) {
+      if (!assertSiteAllowed(req, res, siteId)) return;
+    }
+
+    const result = await users.createOrReactivateManager({
+      username,
+      password,
+      displayName,
+      createdBy: req.user!.id,
+    });
+    if ("conflict" in result) {
+      res.status(409).json({ error: "username_taken" });
+      return;
+    }
+
+    permissions.setSiteIds(result.id, requested, req.user!.id);
+    res.status(201).json({ id: result.id });
+  },
+);
+
+// PATCH /api/gsm/users/:id — право users.manage. Правка сотрудника:
+// {displayName?, siteId?, password?}. siteId допустим только для механика.
+// Смена пароля — установка нового (текущий не спрашиваем: это админ-операция).
+gsmRouter.patch(
+  "/api/gsm/users/:id",
+  requireAuth,
+  requirePermission("users.manage"),
+  async (req: Request, res: Response): Promise<void> => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!canManageUser(req, res, id)) return;
+
+    const body = (req.body ?? {}) as {
+      displayName?: unknown;
+      siteId?: unknown;
+      password?: unknown;
+    };
+
+    const patch: {
+      displayName?: string | null;
+      siteId?: number;
+      password?: string;
+    } = {};
+
+    if (body.displayName !== undefined) {
+      const v = typeof body.displayName === "string" ? body.displayName.trim() : "";
+      patch.displayName = v ? v : null;
+    }
+    if (body.siteId !== undefined) {
+      // Перепривязка к участку — это уже access.manage, а не просто users.manage.
+      if (!permissions.hasPermission(req.user!, "access.manage")) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      const siteId =
+        typeof body.siteId === "number" ? body.siteId : Number(body.siteId);
+      if (!Number.isInteger(siteId) || siteId <= 0 || !sites.isActive(siteId)) {
+        res.status(400).json({ error: "invalid_site" });
+        return;
+      }
+      if (!assertSiteAllowed(req, res, siteId)) return;
+      patch.siteId = siteId;
+    }
+    if (body.password !== undefined) {
+      const password = typeof body.password === "string" ? body.password : "";
+      if (password.length < 6) {
+        res.status(400).json({ error: "weak_password" });
+        return;
+      }
+      patch.password = password;
+    }
+
+    const result = await users.updateUser(id, patch);
+    if (result.ok) {
+      res.status(204).end();
+      return;
+    }
+    res
+      .status(result.reason === "site_not_allowed_for_role" ? 400 : 404)
+      .json({ error: result.reason });
+  },
+);
+
+// DELETE /api/gsm/users/:id — право users.manage. Архивирование сотрудника
+// (менеджера или механика). Супер-админ и сам себя — недоступны (404).
+gsmRouter.delete(
+  "/api/gsm/users/:id",
+  requireAuth,
+  requirePermission("users.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!canManageUser(req, res, id)) return;
+
+    if (!users.softDeleteUser(id)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
+// POST /api/gsm/users/:id/restore — право users.manage. Восстановление из архива.
+gsmRouter.post(
+  "/api/gsm/users/:id/restore",
+  requireAuth,
+  requirePermission("users.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!canManageUser(req, res, id)) return;
+
+    if (!users.restoreUser(id)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
+// PUT /api/gsm/users/:id/sites — право access.manage. Полная замена набора участков.
+// Тело: {siteIds:number[]}. Только для менеджера: у механика участок один и меняется
+// через PATCH /users/:id. Выдать можно только участки из своей области видимости.
+gsmRouter.put(
+  "/api/gsm/users/:id/sites",
+  requireAuth,
+  requirePermission("access.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!canManageUser(req, res, id)) return;
+
+    const target = users.getById(id)!;
+    if (target.role !== "manager") {
+      res.status(400).json({ error: "role_not_manager" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { siteIds?: unknown };
+    if (!Array.isArray(body.siteIds)) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+    const siteIds = (body.siteIds as unknown[])
+      .map((v) => (typeof v === "number" ? v : Number(v)))
+      .filter((v) => Number.isInteger(v) && v > 0);
+    for (const siteId of siteIds) {
+      if (!assertSiteAllowed(req, res, siteId)) return;
+    }
+
+    // Менеджер с ограниченной областью не должен стирать чужие участки цели:
+    // сохраняем те, что вне его области видимости.
+    const actorScope = permissions.allowedSiteIds(req.user!);
+    const preserved =
+      actorScope === null
+        ? []
+        : permissions.listSiteIds(id).filter((s) => !actorScope.includes(s));
+
+    permissions.setSiteIds(id, [...preserved, ...siteIds], req.user!.id);
+    res.status(204).end();
+  },
+);
+
+// PUT /api/gsm/users/:id/permissions — ТОЛЬКО супер-админ. Матрица прав.
+// Тело: {permissions:string[]}. Права выдаются только менеджерам.
+gsmRouter.put(
+  "/api/gsm/users/:id/permissions",
+  requireAuth,
+  requireSuperadmin,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const target = users.getById(id);
+    if (!target || target.role === "superadmin") {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (target.role !== "manager") {
+      res.status(400).json({ error: "role_not_manager" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { permissions?: unknown };
+    if (!Array.isArray(body.permissions)) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+    const requested = (body.permissions as unknown[]).filter(
+      (p): p is Permission =>
+        typeof p === "string" && (ALL_PERMISSIONS as readonly string[]).includes(p),
+    );
+
+    permissions.setPermissions(id, requested, req.user!.id);
+    res.status(204).end();
+  },
+);
+
+// --- Справочник инициаторов заявки -----------------------------------------
+
+// GET /api/gsm/initiators — право initiators.manage. Все записи, включая архивные.
+gsmRouter.get(
+  "/api/gsm/initiators",
+  requireAuth,
+  requirePermission("initiators.manage"),
+  (_req: Request, res: Response): void => {
+    res.status(200).json({ initiators: initiators.list({ includeArchived: true }) });
+  },
+);
+
+// POST /api/gsm/initiators — право initiators.manage. {name,position} → 201 {id}.
+gsmRouter.post(
+  "/api/gsm/initiators",
+  requireAuth,
+  requirePermission("initiators.manage"),
+  (req: Request, res: Response): void => {
+    const body = (req.body ?? {}) as { name?: unknown; position?: unknown };
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const position = typeof body.position === "string" ? body.position.trim() : "";
+    if (!name || !position) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = initiators.create({ name, position }, req.user!.id);
+    if ("conflict" in result) {
+      res.status(409).json({ error: "exists" });
+      return;
+    }
+    res.status(201).json({ id: result.id });
+  },
+);
+
+// PATCH /api/gsm/initiators/:id — право initiators.manage. {name?,position?} → 204.
+gsmRouter.patch(
+  "/api/gsm/initiators/:id",
+  requireAuth,
+  requirePermission("initiators.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { name?: unknown; position?: unknown };
+    const patch: { name?: string; position?: string } = {};
+    if (body.name !== undefined) {
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name) {
+        res.status(400).json({ error: "invalid" });
+        return;
+      }
+      patch.name = name;
+    }
+    if (body.position !== undefined) {
+      const position =
+        typeof body.position === "string" ? body.position.trim() : "";
+      if (!position) {
+        res.status(400).json({ error: "invalid" });
+        return;
+      }
+      patch.position = position;
+    }
+
+    const result = initiators.update(id, patch);
+    if (result.ok) {
+      res.status(204).end();
+      return;
+    }
+    res.status(result.reason === "exists" ? 409 : 404).json({ error: result.reason });
+  },
+);
+
+// DELETE /api/gsm/initiators/:id — право initiators.manage. Архивирование (обратимо).
+gsmRouter.delete(
+  "/api/gsm/initiators/:id",
+  requireAuth,
+  requirePermission("initiators.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null || !initiators.archive(id)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
+// POST /api/gsm/initiators/:id/restore — право initiators.manage. Восстановление.
+gsmRouter.post(
+  "/api/gsm/initiators/:id/restore",
+  requireAuth,
+  requirePermission("initiators.manage"),
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null || !initiators.restore(id)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
     res.status(204).end();
   },
 );

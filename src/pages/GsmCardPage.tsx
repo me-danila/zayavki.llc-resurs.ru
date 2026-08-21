@@ -23,7 +23,9 @@ const GsmCardPage: React.FC = () => {
     return <LoginPage onAuthed={setUser} />;
   }
 
-  if (user.role === 'manager') {
+  // Супер-админ работает на странице менеджера: у него все права и все участки,
+  // плюс дополнительные админ-секции (матрица прав, инициаторы).
+  if (user.role === 'manager' || user.role === 'superadmin') {
     return <ManagerPage user={user} onLoggedOut={logout} />;
   }
 

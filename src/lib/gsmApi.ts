@@ -2,7 +2,16 @@
 // JSON. Сессия живёт в httpOnly cookie gsm_sid, в JS её не видно.
 // На !ok бросаем ApiError с .status и распарсенным телом (.body).
 
-import type { User, Lot, HistoryEvent, Employee, Site } from './gsmTypes';
+import type {
+  User,
+  Lot,
+  HistoryEvent,
+  Employee,
+  Site,
+  AdminUser,
+  Initiator,
+  Permission,
+} from './gsmTypes';
 
 const BASE = '/api/gsm';
 
@@ -301,4 +310,114 @@ export async function deleteEmployee(id: number): Promise<void> {
 // POST /employees/:id/restore → 204. Возврат архивного воркера в активные (is_active=1).
 export async function restoreEmployee(id: number): Promise<void> {
   await request<void>(`/employees/${id}/restore`, { method: 'POST' });
+}
+
+// --- RBAC v5: пользователи, права, доступы ---
+
+// PATCH /sites/:id {name} → 204. 400 invalid / 409 exists / 404 → ApiError.
+export async function renameSite(id: number, name: string): Promise<void> {
+  await request<void>(`/sites/${id}`, { method: 'PATCH', body: { name } });
+}
+
+// GET /users → AdminUser[]. Все сотрудники в области видимости (менеджеры + механики).
+export async function getUsers(): Promise<AdminUser[]> {
+  const { data } = await request<{ users: AdminUser[] }>('/users');
+  return data.users;
+}
+
+// POST /managers {username,password,displayName?,siteIds?} → {id}.
+// 400 invalid_username|weak_password / 409 username_taken → ApiError.
+export async function createManager(input: {
+  username: string;
+  password: string;
+  displayName: string;
+  siteIds: number[];
+}): Promise<{ id: number }> {
+  const { data } = await request<{ id: number }>('/managers', {
+    method: 'POST',
+    body: input,
+  });
+  return data;
+}
+
+// PATCH /users/:id {displayName?,siteId?,password?} → 204.
+// siteId требует права access.manage (иначе 403).
+export async function updateUser(
+  id: number,
+  patch: { displayName?: string; siteId?: number; password?: string },
+): Promise<void> {
+  await request<void>(`/users/${id}`, { method: 'PATCH', body: patch });
+}
+
+// DELETE /users/:id → 204. Архивирование сотрудника (менеджера или механика).
+export async function archiveUser(id: number): Promise<void> {
+  await request<void>(`/users/${id}`, { method: 'DELETE' });
+}
+
+// POST /users/:id/restore → 204.
+export async function restoreUser(id: number): Promise<void> {
+  await request<void>(`/users/${id}/restore`, { method: 'POST' });
+}
+
+// PUT /users/:id/sites {siteIds} → 204. Полная замена доступов менеджера (access.manage).
+export async function setUserSites(id: number, siteIds: number[]): Promise<void> {
+  await request<void>(`/users/${id}/sites`, { method: 'PUT', body: { siteIds } });
+}
+
+// PUT /users/:id/permissions {permissions} → 204. Только супер-админ, только менеджерам.
+export async function setUserPermissions(
+  id: number,
+  permissions: Permission[],
+): Promise<void> {
+  await request<void>(`/users/${id}/permissions`, {
+    method: 'PUT',
+    body: { permissions },
+  });
+}
+
+// --- Справочник инициаторов ---
+
+// GET /initiators → Initiator[] (включая архивные). Требует права initiators.manage.
+export async function getInitiators(): Promise<Initiator[]> {
+  const { data } = await request<{ initiators: Initiator[] }>('/initiators');
+  return data.initiators;
+}
+
+// GET /api/initiators — ПУБЛИЧНЫЙ (форма заявки без авторизации), только активные.
+// Мимо BASE=/api/gsm, поэтому обычный fetch.
+export async function getPublicInitiators(): Promise<Initiator[]> {
+  const res = await fetch('/api/initiators');
+  if (!res.ok) throw new ApiError(res.status, null);
+  const data = (await res.json()) as { initiators: Initiator[] };
+  return data.initiators;
+}
+
+// POST /initiators {name,position} → {id}. 400 invalid / 409 exists → ApiError.
+export async function createInitiator(input: {
+  name: string;
+  position: string;
+}): Promise<{ id: number }> {
+  const { data } = await request<{ id: number }>('/initiators', {
+    method: 'POST',
+    body: input,
+  });
+  return data;
+}
+
+// PATCH /initiators/:id {name?,position?} → 204.
+export async function updateInitiator(
+  id: number,
+  patch: { name?: string; position?: string },
+): Promise<void> {
+  await request<void>(`/initiators/${id}`, { method: 'PATCH', body: patch });
+}
+
+// DELETE /initiators/:id → 204. Архивирование (обратимо через restoreInitiator).
+export async function archiveInitiator(id: number): Promise<void> {
+  await request<void>(`/initiators/${id}`, { method: 'DELETE' });
+}
+
+// POST /initiators/:id/restore → 204.
+export async function restoreInitiator(id: number): Promise<void> {
+  await request<void>(`/initiators/${id}/restore`, { method: 'POST' });
 }

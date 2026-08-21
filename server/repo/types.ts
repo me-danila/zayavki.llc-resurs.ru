@@ -1,6 +1,28 @@
 // Канон-типы (§4 ТЗ). Общие для repo-слоя и будущего API-слоя.
 
-export type Role = "manager" | "worker";
+export type Role = "superadmin" | "manager" | "worker";
+
+// Права матрицы RBAC (таблица user_permissions). Супер-админ имеет все неявно.
+// sites.manage      — создавать/переименовывать/архивировать участки
+// users.manage      — создавать/редактировать/архивировать сотрудников (менеджеров и механиков)
+// access.manage     — привязывать сотрудников к участкам
+// initiators.manage — вести справочник инициаторов заявки
+export const ALL_PERMISSIONS = [
+  "sites.manage",
+  "users.manage",
+  "access.manage",
+  "initiators.manage",
+] as const;
+
+export type Permission = (typeof ALL_PERMISSIONS)[number];
+
+// Инициатор заявки (таблица initiators). Бывший хардкод src/data/initiatorData.tsx.
+export type Initiator = {
+  id: number;
+  name: string;
+  position: string;
+  active: boolean;
+};
 
 // Управляемый участок (таблица sites). active = is_active=1.
 export type Site = {
@@ -18,6 +40,21 @@ export type User = {
   role: Role;
   siteId: number | null;
   siteName: string | null;
+};
+
+// Строка списка пользователей в админке (GET /api/gsm/users).
+// permissions/siteIds заполняются только для менеджеров — у воркера область
+// определяется его siteId, у супер-админа права неявные.
+export type UserListItem = {
+  id: number;
+  username: string;
+  displayName: string | null;
+  role: Role;
+  siteId: number | null;
+  siteName: string | null;
+  active: boolean;
+  permissions: Permission[];
+  siteIds: number[];
 };
 
 // Элемент списка воркеров для админки менеджера (GET /api/gsm/employees).

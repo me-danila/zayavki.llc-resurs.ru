@@ -106,23 +106,42 @@ const LIST_SELECT = `
 // Список партий. Опционально фильтр по участку (для воркера — его site).
 // Voided-приходы исключаются. Сортировка: сначала активные (balance > EPS),
 // затем по эффективной received_date DESC, id DESC.
-export function list(opts: { siteId?: number } = {}): Lot[] {
+export function list(opts: { siteId?: number; siteIds?: number[] } = {}): Lot[] {
   // Активность считаем в SQL тем же эпсилон-порогом, что и на беке/фронте.
   const activeExpr = `${BALANCE_EFF} > 1e-9`;
 
-  const where =
-    opts.siteId != null
-      ? `WHERE ${RECEIPT_NOT_VOIDED} AND r.site_id = ?`
-      : `WHERE ${RECEIPT_NOT_VOIDED}`;
+  // siteIds — область видимости менеджера (v5, user_sites). Пустой список = ничего.
+  if (opts.siteIds && opts.siteIds.length === 0) return [];
+
+  const conds = [RECEIPT_NOT_VOIDED];
+  const args: number[] = [];
+  if (opts.siteId != null) {
+    conds.push("r.site_id = ?");
+    args.push(opts.siteId);
+  }
+  if (opts.siteIds) {
+    conds.push(`r.site_id IN (${opts.siteIds.map(() => "?").join(",")})`);
+    args.push(...opts.siteIds);
+  }
+
+  const where = `WHERE ${conds.join(" AND ")}`;
   const order = `ORDER BY ${activeExpr} DESC, COALESCE(cr.new_date, r.received_date) DESC, r.id DESC`;
   const sql = `${LIST_SELECT} ${where} ${order}`;
 
-  const rows =
-    opts.siteId != null
-      ? db.query<LotListRow, [number]>(sql).all(opts.siteId)
-      : db.query<LotListRow, []>(sql).all();
+  return db.query<LotListRow, number[]>(sql).all(...args).map(mapLot);
+}
 
-  return rows.map(mapLot);
+// Участок, к которому относится списание (через его партию). null — списания нет.
+// Нужен для проверки области видимости менеджера при корректировках (v5).
+export function siteIdOfWriteoff(writeoffId: number): number | null {
+  const row = db
+    .query<{ site_id: number }, [number]>(
+      `SELECT r.site_id FROM writeoffs w
+         JOIN receipts r ON r.id = w.receipt_id
+        WHERE w.id = ?`,
+    )
+    .get(writeoffId);
+  return row?.site_id ?? null;
 }
 
 // Лёгкая выборка партии для проверок (списание/доступ). Значения эффективные.

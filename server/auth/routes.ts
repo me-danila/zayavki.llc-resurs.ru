@@ -6,11 +6,23 @@ import { Router, type Request, type Response } from "express";
 import * as users from "../repo/users";
 import * as sessions from "../repo/sessions";
 import { toUser } from "../repo/types";
+import type { User } from "../repo/types";
+import * as permissions from "../repo/permissions";
 import { setSession, clearSession, parseCookies, SESSION_COOKIE } from "./cookies";
 import { requireAuth } from "./middleware";
 import { loginLimiter, registerFailure, resetFailures } from "./rateLimit";
 
 export const authRouter = Router();
+
+// Ответ /login и /me: пользователь + его эффективные права и участки (v5).
+// Фронт по ним рисует админ-секции; сервер всё равно перепроверяет каждый роут.
+function sessionPayload(user: User) {
+  return {
+    ...user,
+    permissions: permissions.effectivePermissions(user),
+    siteIds: permissions.allowedSiteIds(user),
+  };
+}
 
 // Ключ rate-limit: логин + IP. trust proxy в index.ts → req.ip учитывает X-Forwarded-For.
 function limiterKey(username: string, req: Request): string {
@@ -46,7 +58,9 @@ authRouter.post("/api/gsm/login", async (req: Request, res: Response) => {
   const { token } = sessions.create(row.id);
   setSession(res, token);
   // siteName берём JOIN sites (getUserById): null у менеджера, имя участка у воркера.
-  res.status(200).json({ user: users.getUserById(row.id) ?? toUser(row, null) });
+  res.status(200).json({
+    user: sessionPayload(users.getUserById(row.id) ?? toUser(row, null)),
+  });
 });
 
 // POST /api/gsm/logout — auth. Удаляет сессию (если есть) + чистит cookie. Всегда 204.
@@ -59,5 +73,5 @@ authRouter.post("/api/gsm/logout", requireAuth, (req: Request, res: Response) =>
 
 // GET /api/gsm/me — auth. Текущий пользователь из сессии.
 authRouter.get("/api/gsm/me", requireAuth, (req: Request, res: Response) => {
-  res.status(200).json({ user: req.user });
+  res.status(200).json({ user: sessionPayload(req.user!) });
 });

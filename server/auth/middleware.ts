@@ -6,7 +6,8 @@
 
 import type { Request, Response, NextFunction } from "express";
 import * as sessions from "../repo/sessions";
-import type { User } from "../repo/types";
+import type { Permission, User } from "../repo/types";
+import { canAccessSite, hasPermission } from "../repo/permissions";
 import { parseCookies, SESSION_COOKIE } from "./cookies";
 
 // Augment Express.Request — req.user доступен во всех роутерах после attachUser.
@@ -39,15 +40,62 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-// Требует роль manager. Подразумевает requireAuth раньше (но безопасно и без него).
+// Требует роль manager. Супер-админ проходит тоже: его права — надмножество
+// менеджерских. Подразумевает requireAuth раньше (но безопасно и без него).
 export function requireManager(req: Request, res: Response, next: NextFunction): void {
   if (!req.user) {
     res.status(401).json({ error: "unauthorized" });
     return;
   }
-  if (req.user.role !== "manager") {
+  if (req.user.role !== "manager" && req.user.role !== "superadmin") {
     res.status(403).json({ error: "forbidden" });
     return;
   }
   next();
+}
+
+// --- RBAC v5 ----------------------------------------------------------------
+
+// Требует роль superadmin. Только он правит матрицу прав и справочник ролей доступа.
+export function requireSuperadmin(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (!req.user) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  if (req.user.role !== "superadmin") {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  next();
+}
+
+// Требует конкретное право из матрицы. Супер-админ проходит всегда (права неявные).
+export function requirePermission(permission: Permission) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    if (!hasPermission(req.user, permission)) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    next();
+  };
+}
+
+// Гард операций ГСМ по участку: 403 forbidden_site, если участок вне области
+// видимости пользователя. Сервер — единственный источник правды (канон §3.4).
+export function assertSiteAllowed(
+  req: Request,
+  res: Response,
+  siteId: number,
+): boolean {
+  if (canAccessSite(req.user!, siteId)) return true;
+  res.status(403).json({ error: "forbidden_site" });
+  return false;
 }
