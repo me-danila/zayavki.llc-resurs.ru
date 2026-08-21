@@ -7,7 +7,8 @@
     <title>ООО «Ресурс»</title>
     <script>
       // Нативный title по маршруту — до первого рендера, без скачка.
-      if (location.pathname.replace(/\/+$/, '') === '/gsm') document.title = 'Карточка ГСМ';
+      const p = location.pathname.replace(/\/+$/, '');
+      if (p === '/gsm' || p.startsWith('/gsm/')) document.title = 'Склад';
     </script>
   </head>
   <body>

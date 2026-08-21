@@ -52,7 +52,7 @@ const ZayavkaPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] py-4 px-4 sm:py-8 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <AppHeader title="Новая заявка" />
 
         <FormProvider {...methods}>

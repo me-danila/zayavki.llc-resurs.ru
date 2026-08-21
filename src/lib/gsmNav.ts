@@ -12,7 +12,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: '/gsm', label: 'Приход' },
+  { href: '/gsm', label: 'Приход ГСМ' },
   { href: '/gsm/parts', label: 'Материалы' },
   { href: '/gsm/stock', label: 'Остатки' },
   { href: '/gsm/sites', label: 'Участки', permission: 'sites.manage' },

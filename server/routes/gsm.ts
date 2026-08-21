@@ -1209,6 +1209,7 @@ gsmRouter.post(
         qty?: unknown;
         licensePlate?: unknown;
         recipient?: unknown;
+        comment?: unknown;
       };
       rows.push({
         partNumber: typeof r.partNumber === "string" ? r.partNumber : "",
@@ -1216,6 +1217,8 @@ gsmRouter.post(
         qty: typeof r.qty === "number" ? r.qty : Number(r.qty),
         licensePlate: typeof r.licensePlate === "string" ? r.licensePlate : "",
         recipient: typeof r.recipient === "string" ? r.recipient : "",
+        // Комментарий необязателен: пустая строка эквивалентна его отсутствию.
+        comment: typeof r.comment === "string" ? r.comment : null,
       });
     }
 
@@ -1291,6 +1294,7 @@ gsmRouter.post(
       qty?: unknown;
       licensePlate?: unknown;
       recipient?: unknown;
+      comment?: unknown;
     };
 
     let input: partIssues.CorrectionInput;
@@ -1316,6 +1320,9 @@ gsmRouter.post(
       }
       if (body.recipient !== undefined) {
         input.recipient = typeof body.recipient === "string" ? body.recipient : "";
+      }
+      if (body.comment !== undefined) {
+        input.comment = typeof body.comment === "string" ? body.comment : null;
       }
     } else {
       res.status(400).json({ error: "invalid" });

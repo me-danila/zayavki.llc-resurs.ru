@@ -93,6 +93,7 @@ export type PartIssue = {
   qty: number;
   licensePlate: string;
   recipient: string;
+  comment: string | null;
   voided: boolean;
   author: { username: string; displayName: string | null };
   // Действующая корректировка: original — то, что было ДО правки.
@@ -107,6 +108,7 @@ export type PartIssue = {
       qty: number;
       licensePlate: string;
       recipient: string;
+      comment: string | null;
     };
   };
 };

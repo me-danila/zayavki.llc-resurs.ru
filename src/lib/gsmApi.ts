@@ -458,6 +458,7 @@ export async function createPartIssues(
     qty: number;
     licensePlate: string;
     recipient: string;
+    comment?: string | null;
   }>,
 ): Promise<{ created: number }> {
   const { data } = await request<{ created: number }>('/part-issues', {
@@ -481,6 +482,7 @@ export async function correctPartIssue(
         qty?: number;
         licensePlate?: string;
         recipient?: string;
+        comment?: string | null;
       },
 ): Promise<{ id: number }> {
   const { data } = await request<{ id: number }>(`/part-issues/${id}/correct`, {

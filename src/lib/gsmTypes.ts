@@ -74,6 +74,7 @@ export type PartIssue = {
   qty: number;
   licensePlate: string;
   recipient: string;
+  comment: string | null;
   voided: boolean;
   author: { username: string; displayName: string | null };
   correction?: {
@@ -87,6 +88,7 @@ export type PartIssue = {
       qty: number;
       licensePlate: string;
       recipient: string;
+      comment: string | null;
     };
   };
 };

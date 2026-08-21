@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -218,6 +218,19 @@ function seedInitiators() {
   for (const [name, position] of DEFAULT_INITIATORS) ins.run(name, position);
 }
 
+// Миграция v6 → v7: колонка comment в расходе материалов.
+// Чистый ALTER TABLE ADD COLUMN — данные не трогает, CHECK менять не нужно.
+function migratePartIssueComment() {
+  for (const [table, column] of [
+    ["part_issues", "comment"],
+    ["part_issue_corrections", "new_comment"],
+  ] as const) {
+    if (!hasColumn(table, column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+    }
+  }
+}
+
 // Миграция v4 → v5: роль 'superadmin' в CHECK таблицы users.
 // SQLite не умеет ALTER CHECK — только rebuild таблицы (как в migrateToV2).
 function migrateUsersRoleCheck() {
@@ -305,6 +318,8 @@ CREATE TABLE IF NOT EXISTS part_issues (
   qty           INTEGER NOT NULL CHECK (qty > 0 AND qty = CAST(qty AS INTEGER)),
   license_plate TEXT NOT NULL,
   recipient     TEXT NOT NULL,
+  -- Комментарий механика, необязателен (v7).
+  comment       TEXT,
   created_by    INTEGER NOT NULL REFERENCES users(id),
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -329,6 +344,7 @@ CREATE TABLE IF NOT EXISTS part_issue_corrections (
   new_qty           INTEGER CHECK (new_qty IS NULL OR (new_qty > 0 AND new_qty = CAST(new_qty AS INTEGER))),
   new_license_plate TEXT,
   new_recipient     TEXT,
+  new_comment       TEXT,
   created_by        INTEGER NOT NULL REFERENCES users(id),
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -474,6 +490,8 @@ export function bootstrap() {
   db.exec(INDEXES_TRIGGERS_DDL);
   // 9. Расход штучных материалов (v6) — аддитивно, существующие таблицы не трогает.
   db.exec(PARTS_DDL);
+  // 10. v7: колонка comment у расхода материалов (ADD COLUMN, данные не трогает).
+  migratePartIssueComment();
 
   if (prevVersion < SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

@@ -28,6 +28,7 @@ type EditDraft = {
   qty: string;
   licensePlate: string;
   recipient: string;
+  comment: string;
 };
 
 function draftFrom(issue: PartIssue): EditDraft {
@@ -38,6 +39,7 @@ function draftFrom(issue: PartIssue): EditDraft {
     qty: String(issue.qty),
     licensePlate: issue.licensePlate,
     recipient: issue.recipient,
+    comment: issue.comment ?? '',
   };
 }
 
@@ -117,6 +119,7 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
         qty,
         licensePlate: draft.licensePlate.trim(),
         recipient: draft.recipient.trim(),
+        comment: draft.comment.trim() ? draft.comment.trim() : null,
       });
       setEditing(null);
       setDraft(null);
@@ -163,7 +166,7 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
               type="text"
               value={filter.search ?? ''}
               onChange={(e) => patchFilter({ search: e.target.value })}
-              placeholder="Деталь, наименование, номер, получатель…"
+              placeholder="Деталь, наименование, номер, получатель, комментарий…"
               className="resource-input pl-9 text-sm"
             />
           </div>
@@ -293,6 +296,11 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
                       <div className="text-[11px] text-gray-400">
                         № {i.partNumber}
                       </div>
+                      {i.comment && (
+                        <div className="mt-0.5 text-[11px] text-gray-500">
+                          Комментарий: {i.comment}
+                        </div>
+                      )}
                       {i.correction?.action === 'edit' && (
                         <div className="mt-1 text-[11px] text-amber-600">
                           правка от {authorName(i.correction.author)}: было{' '}
@@ -421,6 +429,17 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
                   type="text"
                   value={draft.recipient}
                   onChange={(e) => setDraft({ ...draft, recipient: e.target.value })}
+                  className="resource-input text-sm"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="resource-label">
+                  Комментарий <span className="text-gray-300">— не обязательно</span>
+                </label>
+                <input
+                  type="text"
+                  value={draft.comment}
+                  onChange={(e) => setDraft({ ...draft, comment: e.target.value })}
                   className="resource-input text-sm"
                 />
               </div>

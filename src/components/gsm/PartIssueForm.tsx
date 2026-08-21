@@ -7,6 +7,7 @@
 //
 // Гос. номер — Combobox по общему справочнику LICENSE_PLATES (тот же, что в списании
 // ГСМ и в форме заявки). Остальные поля — свободный ввод.
+// Комментарий необязателен: пустой уходит на сервер как null.
 
 import React from 'react';
 import { Loader2, Plus, Send, Trash2 } from 'lucide-react';
@@ -27,6 +28,7 @@ type Row = {
   qty: string;
   licensePlate: string;
   recipient: string;
+  comment: string;
 };
 
 const EMPTY_ROW: Row = {
@@ -35,6 +37,7 @@ const EMPTY_ROW: Row = {
   qty: '',
   licensePlate: '',
   recipient: '',
+  comment: '',
 };
 
 // Количество — только целые штуки: это условие и в схеме БД (CHECK), и на сервере.
@@ -71,6 +74,7 @@ const PartIssueForm: React.FC<PartIssueFormProps> = ({ onSaved }) => {
       qty: number;
       licensePlate: string;
       recipient: string;
+      comment: string | null;
     }> = [];
 
     for (const [i, r] of rows.entries()) {
@@ -93,6 +97,8 @@ const PartIssueForm: React.FC<PartIssueFormProps> = ({ onSaved }) => {
         qty,
         licensePlate: r.licensePlate.trim(),
         recipient: r.recipient.trim(),
+        // Комментарий необязателен — пустой уходит как null.
+        comment: r.comment.trim() ? r.comment.trim() : null,
       });
     }
 
@@ -149,7 +155,7 @@ const PartIssueForm: React.FC<PartIssueFormProps> = ({ onSaved }) => {
                   onChange={(e) => patchRow(index, { partNumber: e.target.value })}
                   autoComplete="off"
                   className="resource-input text-sm"
-                  placeholder="Напр. 740.1003213"
+                  placeholder="БП-0000"
                 />
               </div>
 
@@ -196,6 +202,20 @@ const PartIssueForm: React.FC<PartIssueFormProps> = ({ onSaved }) => {
                   autoComplete="off"
                   className="resource-input text-sm"
                   placeholder="Иванов И.И."
+                />
+              </div>
+
+              <div className="sm:col-span-12">
+                <label className="resource-label">
+                  Комментарий <span className="text-gray-300">— не обязательно</span>
+                </label>
+                <input
+                  type="text"
+                  value={row.comment}
+                  onChange={(e) => patchRow(index, { comment: e.target.value })}
+                  autoComplete="off"
+                  className="resource-input text-sm"
+                  placeholder="Дополнительная информация"
                 />
               </div>
             </div>

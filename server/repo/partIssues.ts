@@ -28,6 +28,7 @@ type Row = {
   qty: number;
   license_plate: string;
   recipient: string;
+  comment: string | null;
   voided: number;
   created_by: number;
   author_username: string | null;
@@ -42,6 +43,7 @@ type Row = {
   orig_qty: number;
   orig_license_plate: string;
   orig_recipient: string;
+  orig_comment: string | null;
 };
 
 // SELECT с подстановкой эффективных значений: COALESCE(new_*, исходное).
@@ -56,6 +58,7 @@ const SELECT = `
          COALESCE(pc.new_qty, pi.qty)                           AS qty,
          COALESCE(pc.new_license_plate, pi.license_plate)       AS license_plate,
          COALESCE(pc.new_recipient, pi.recipient)               AS recipient,
+         CASE WHEN pc.action = 'edit' THEN pc.new_comment ELSE pi.comment END AS comment,
          CASE WHEN pc.action = 'void' THEN 1 ELSE 0 END         AS voided,
          pi.created_by,
          au.username     AS author_username,
@@ -69,7 +72,8 @@ const SELECT = `
          pi.name          AS orig_name,
          pi.qty           AS orig_qty,
          pi.license_plate AS orig_license_plate,
-         pi.recipient     AS orig_recipient
+         pi.recipient     AS orig_recipient,
+         pi.comment       AS orig_comment
     FROM part_issues pi
     JOIN sites s ON s.id = pi.site_id
     LEFT JOIN users au ON au.id = pi.created_by
@@ -87,6 +91,7 @@ function mapRow(r: Row): PartIssue {
     qty: r.qty,
     licensePlate: r.license_plate,
     recipient: r.recipient,
+    comment: r.comment,
     voided: r.voided === 1,
     author: {
       username: r.author_username ?? "",
@@ -108,6 +113,7 @@ function mapRow(r: Row): PartIssue {
         qty: r.orig_qty,
         licensePlate: r.orig_license_plate,
         recipient: r.orig_recipient,
+        comment: r.orig_comment,
       },
     };
   }
@@ -120,6 +126,8 @@ export type PartIssueInput = {
   qty: number;
   licensePlate: string;
   recipient: string;
+  // Комментарий механика — необязателен (v7).
+  comment?: string | null;
 };
 
 // Валидация одной строки. Пустые поля и нецелые/неположительные количества — мимо.
@@ -143,10 +151,13 @@ export function createMany(
   if (!rows.length) return { ok: false, error: "invalid_row" };
   if (!rows.every(isValidInput)) return { ok: false, error: "invalid_row" };
 
-  const ins = db.query<null, [number, string, string, string, number, string, string, number]>(
+  const ins = db.query<
+    null,
+    [number, string, string, string, number, string, string, string | null, number]
+  >(
     `INSERT INTO part_issues
-       (site_id, issue_date, part_number, name, qty, license_plate, recipient, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (site_id, issue_date, part_number, name, qty, license_plate, recipient, comment, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
   db.transaction(() => {
@@ -159,6 +170,7 @@ export function createMany(
         r.qty,
         r.licensePlate.trim(),
         r.recipient.trim(),
+        r.comment?.trim() ? r.comment.trim() : null,
         ctx.createdBy,
       );
     }
@@ -217,9 +229,10 @@ export function list(filter: ListFilter): PartIssue[] {
       COALESCE(pc.new_part_number, pi.part_number) LIKE ? OR
       COALESCE(pc.new_name, pi.name) LIKE ? OR
       COALESCE(pc.new_license_plate, pi.license_plate) LIKE ? OR
-      COALESCE(pc.new_recipient, pi.recipient) LIKE ?
+      COALESCE(pc.new_recipient, pi.recipient) LIKE ? OR
+      COALESCE(pc.new_comment, pi.comment) LIKE ?
     )`);
-    args.push(like, like, like, like);
+    args.push(like, like, like, like, like);
   }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
@@ -247,6 +260,7 @@ export type CorrectionInput =
       qty?: number;
       licensePlate?: string;
       recipient?: string;
+      comment?: string | null;
     };
 
 export type CorrectResult =
@@ -283,6 +297,8 @@ export function correct(
   const qty = input.qty ?? current.qty;
   const licensePlate = (input.licensePlate ?? current.licensePlate).trim();
   const recipient = (input.recipient ?? current.recipient).trim();
+  const commentRaw = input.comment !== undefined ? input.comment : current.comment;
+  const comment = commentRaw?.trim() ? commentRaw.trim() : null;
 
   const dateOk = /^\d{4}-\d{2}-\d{2}$/.test(issueDate);
   if (
@@ -300,13 +316,13 @@ export function correct(
   const res = db
     .query<
       { id: number },
-      [number, string, string, string, number, string, string, number]
+      [number, string, string, string, number, string, string, string | null, number]
     >(
       `INSERT INTO part_issue_corrections
-         (target_id, action, new_date, new_part_number, new_name, new_qty, new_license_plate, new_recipient, created_by)
-       VALUES (?, 'edit', ?, ?, ?, ?, ?, ?, ?)
+         (target_id, action, new_date, new_part_number, new_name, new_qty, new_license_plate, new_recipient, new_comment, created_by)
+       VALUES (?, 'edit', ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING id`,
     )
-    .get(id, issueDate, partNumber, name, qty, licensePlate, recipient, managerId)!;
+    .get(id, issueDate, partNumber, name, qty, licensePlate, recipient, comment, managerId)!;
   return { ok: true, id: res.id };
 }

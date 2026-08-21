@@ -104,7 +104,7 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
         nav={<GsmNav user={user} path={route} />}
       />
 
-      <div className="max-w-5xl mx-auto space-y-6 py-4 px-4 sm:py-8 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto space-y-6 py-4 px-4 sm:py-8 sm:px-6 lg:px-8">
         {route === '/gsm' && <ReceiptPage sites={activeSites} onSaved={loadLots} />}
         {route === '/gsm/stock' && (
           <StockPage

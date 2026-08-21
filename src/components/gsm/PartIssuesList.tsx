@@ -75,6 +75,11 @@ const PartIssuesList: React.FC<PartIssuesListProps> = ({ reloadKey }) => {
               <p className="truncate text-[11px] text-gray-400">
                 № {i.partNumber} · {i.licensePlate} · {i.recipient}
               </p>
+              {i.comment && (
+                <p className="truncate text-[11px] text-gray-500">
+                  Комментарий: {i.comment}
+                </p>
+              )}
               {i.voided && (
                 <p className="text-[11px] text-red-500">отменено менеджером</p>
               )}
