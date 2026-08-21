@@ -5,7 +5,7 @@
 // НЕ уменьшает balanceAfter — «остаток» у такой строки прячем); edit — бейдж
 // «Исправлено» + мелкая строка «было: …». scope='manager' даёт `…`-меню у КАЖДОГО
 // правимого события без корректировки: у прихода (kind='receipt', id = lot.id) —
-// модалки correctReceipt (правка/сторно), у списания — модалки correctWriteoff.
+// модалки correctReceipt (правка/отмена), у списания — модалки correctWriteoff.
 // transfer_in/transfer_out не правятся. № авто в правке списания — тот же Combobox
 // LICENSE_PLATES, что у механика (WriteOffRow). scope='worker' (дефолт) — read-only.
 // После успеха — внутренний refetch + onChanged() (родитель обновит остатки).
@@ -38,7 +38,7 @@ import Modal from './Modal';
 export interface LotHistoryProps {
   lotId: number;
   unit?: string;
-  // 'worker' (дефолт) — read-only; 'manager' — правка/сторно прихода и списаний.
+  // 'worker' (дефолт) — read-only; 'manager' — правка/отмена прихода и списаний.
   scope?: 'manager' | 'worker';
   // Дёргается после успешной корректировки (родитель перезагрузит lots).
   onChanged?: () => void;
@@ -107,7 +107,7 @@ const receiptErrorText = (err: unknown, unit: string): string => {
   return 'Не удалось сохранить. Попробуйте позже.';
 };
 
-// --- Содержимое confirm-модалки сторно списания ---
+// --- Содержимое confirm-модалки отмены списания ---
 
 interface WriteoffVoidConfirmProps {
   ev: HistoryEvent;
@@ -494,7 +494,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({
     lot: Lot;
   } | null>(null);
   const [error, setError] = React.useState(false);
-  // Открытая модалка правки/сторно события (приход или списание — по ev.kind).
+  // Открытая модалка правки/отмена события (приход или списание — по ev.kind).
   const [modal, setModal] = React.useState<{
     ev: HistoryEvent;
     mode: 'void' | 'edit';
@@ -703,7 +703,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({
         })}
       </ul>
 
-      {/* Модалки правки/сторно списания */}
+      {/* Модалки правки/отмена списания */}
       {modal?.mode === 'void' && !isReceiptModal && (
         <Modal open onClose={() => setModal(null)} title="Отмена списания">
           <WriteoffVoidConfirm
@@ -730,7 +730,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({
         </Modal>
       )}
 
-      {/* Модалки правки/сторно прихода (id прихода = id партии) */}
+      {/* Модалки правки/отмена прихода (id прихода = id партии) */}
       {modal?.mode === 'void' && isReceiptModal && lot && (
         <Modal open onClose={() => setModal(null)} title="Отмена прихода">
           <VoidReceiptConfirm

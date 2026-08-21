@@ -81,6 +81,36 @@ export type UserRow = {
   created_by: number | null;
 };
 
+// Расход штучных материалов (v6). Значения ЭФФЕКТИВНЫЕ: действует последняя
+// корректировка; voided=true — запись отменена (в таблице показываем зачёркнутой).
+export type PartIssue = {
+  id: number;
+  siteId: number;
+  siteName: string;
+  issueDate: string;
+  partNumber: string;
+  name: string;
+  qty: number;
+  licensePlate: string;
+  recipient: string;
+  voided: boolean;
+  author: { username: string; displayName: string | null };
+  // Действующая корректировка: original — то, что было ДО правки.
+  correction?: {
+    action: "void" | "edit";
+    date: string;
+    author: { username: string; displayName: string | null };
+    original: {
+      issueDate: string;
+      partNumber: string;
+      name: string;
+      qty: number;
+      licensePlate: string;
+      recipient: string;
+    };
+  };
+};
+
 export type Lot = {
   id: number;
   name: string;
@@ -104,7 +134,7 @@ export type HistoryEvent = {
   // Для transfer_out — целевой участок; для transfer_in — исходный участок.
   counterSiteName?: string;
   author: { username: string; displayName: string | null };
-  // id списания — для кнопок сторно/правки на фронте (у прихода есть id партии).
+  // id списания — для кнопок отмены/правки на фронте (у прихода есть id партии).
   writeoffId?: number;
   // Действующая корректировка (v4): значения события уже эффективные,
   // original — то, что было ДО корректировки; date — день правки (YYYY-MM-DD).

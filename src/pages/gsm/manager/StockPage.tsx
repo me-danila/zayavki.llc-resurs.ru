@@ -35,7 +35,7 @@ const StockPage: React.FC<StockPageProps> = ({
     <div className="space-y-4">
       <PageHeading
         title="Остатки по участкам"
-        description="Партии в доступных вам участках. Правка, сторно и перемещение — в меню строки."
+        description="Партии в доступных вам участках. Правка, отмена и перемещение — в меню строки."
       />
 
       {lots === null && !lotsError && (

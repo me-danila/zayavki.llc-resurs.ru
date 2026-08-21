@@ -1,4 +1,8 @@
-// Страница СОТРУДНИКА участка. Воркер видит только свой участок (бэк фильтрует /lots
+// Страница СОТРУДНИКА участка. Две вкладки в хедере: «ГСМ» (остатки, списание,
+// перемещение — как было) и «Материалы» (расход штучных материалов, v6).
+// Маршрут выбирает мини-роутер, как у менеджера; всё остальное не менялось.
+//
+// Воркер видит только свой участок (бэк фильтрует /lots
 // по session.siteId). Остатки — тот же StockTable, что у менеджера (scope='worker'):
 // таблица на десктопе / карточки на мобилке, поиск, вкладки; без группировки и фильтра
 // по участкам (участок один). `…`-меню строки: «Списать» / «Переместить» / «История»
@@ -7,6 +11,10 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import GsmHeader from '../../components/gsm/GsmHeader';
+import GsmNav from '../../components/gsm/GsmNav';
+import PartIssueForm from '../../components/gsm/PartIssueForm';
+import PartIssuesList from '../../components/gsm/PartIssuesList';
+import { useRoute } from '../../lib/router';
 import StockTable from '../../components/gsm/StockTable';
 import WriteOffForm from '../../components/gsm/WriteOffForm';
 import TransferForm from '../../components/gsm/TransferForm';
@@ -20,6 +28,10 @@ export interface EmployeePageProps {
 }
 
 const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
+  const path = useRoute();
+  const route = path === '/gsm/parts' ? '/gsm/parts' : '/gsm';
+  // Счётчик перезагрузки списка расхода после сохранения новой серии.
+  const [partsVersion, setPartsVersion] = React.useState(0);
   const [lots, setLots] = React.useState<Lot[] | null>(null);
   const [error, setError] = React.useState(false);
   // Партия, выбранная для списания / перемещения (открывает соответствующую модалку).
@@ -85,10 +97,19 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
 
   return (
     <div className="min-h-screen bg-[#F9FAFB] font-sans">
-      <GsmHeader user={user} onLogout={onLoggedOut} />
+      <GsmHeader
+        user={user}
+        onLogout={onLoggedOut}
+        nav={<GsmNav user={user} path={route} />}
+      />
 
       <div className="max-w-5xl mx-auto space-y-6 py-4 px-4 sm:py-8 sm:px-6 lg:px-8">
-        {lots === null ? (
+        {route === '/gsm/parts' ? (
+          <div className="space-y-6">
+            <PartIssueForm onSaved={() => setPartsVersion((v) => v + 1)} />
+            <PartIssuesList reloadKey={partsVersion} />
+          </div>
+        ) : lots === null ? (
           <div className="flex items-center gap-2 py-10 text-sm text-gray-400">
             <Loader2 className="w-4 h-4 animate-spin" />
             Загрузка остатков…

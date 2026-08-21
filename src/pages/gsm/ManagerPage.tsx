@@ -8,6 +8,7 @@
 //   /gsm/stock      — остатки по участкам (+ модалка перемещения)
 //   /gsm/sites      — участки             (право sites.manage)
 //   /gsm/staff      — сотрудники          (право users.manage)
+//   /gsm/parts      — расход материалов
 //   /gsm/initiators — инициаторы заявки   (право initiators.manage)
 // Страница механика (EmployeePage) не менялась.
 //
@@ -26,6 +27,7 @@ import StockPage from './manager/StockPage';
 import SitesPage from './manager/SitesPage';
 import StaffPage from './manager/StaffPage';
 import InitiatorsPage from './manager/InitiatorsPage';
+import PartsPage from './manager/PartsPage';
 
 export interface ManagerPageProps {
   user: User;
@@ -114,6 +116,7 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
         )}
         {route === '/gsm/sites' && <SitesPage onChanged={loadSites} />}
         {route === '/gsm/staff' && <StaffPage user={user} sites={activeSites} />}
+        {route === '/gsm/parts' && <PartsPage sites={activeSites} />}
         {route === '/gsm/initiators' && <InitiatorsPage />}
       </div>
     </div>

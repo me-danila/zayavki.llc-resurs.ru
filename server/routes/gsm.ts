@@ -21,9 +21,11 @@ import * as transfers from "../repo/transfers";
 import * as corrections from "../repo/corrections";
 import * as permissions from "../repo/permissions";
 import * as initiators from "../repo/initiators";
+import * as partIssues from "../repo/partIssues";
+import { createPartIssuesXlsx } from "../services/partIssuesXlsx";
 import type { Permission } from "../repo/types";
 import { ALL_PERMISSIONS } from "../repo/types";
-import { isValidDate } from "../lib/dates";
+import { isValidDate, todayMsk } from "../lib/dates";
 
 export const gsmRouter = Router();
 
@@ -442,7 +444,7 @@ gsmRouter.post(
   },
 );
 
-// POST /api/gsm/writeoffs/:id/correct — manager. Сторно/правка списания (v4).
+// POST /api/gsm/writeoffs/:id/correct — manager. Отмена/правка списания (v4).
 // Тело: {action:'void'} | {action:'edit', date?, amount?, licensePlate?, reason?}.
 // Маппинг: not_found→404; transfer_locked/already_voided→409;
 // exceeds→409 {error,balance}; invalid→400; ok→201 {id}.
@@ -523,7 +525,7 @@ gsmRouter.post(
   },
 );
 
-// POST /api/gsm/receipts/:id/correct — manager. Сторно/правка прихода (партии) (v4).
+// POST /api/gsm/receipts/:id/correct — manager. Отмена/правка прихода (партии) (v4).
 // Тело: {action:'void'} | {action:'edit', receivedDate?, name?, code?, unit?, quantity?}.
 // Участок партии НЕ меняется. Маппинг: not_found→404;
 // transfer_locked/already_voided/has_writeoffs→409; exceeds→409 {error,balance};
@@ -1139,5 +1141,202 @@ gsmRouter.post(
       return;
     }
     res.status(204).end();
+  },
+);
+
+// --- Расход штучных материалов (v6) -----------------------------------------
+// Независимый журнал: без прихода, партий и остатков. Вносит ТОЛЬКО механик,
+// участок берётся из его сессии, дата — серверная (сегодня по МСК): из тела
+// запроса ни то, ни другое не принимается, поэтому задним числом не внести.
+
+// Разбор фильтров списка. siteIds — область видимости пользователя.
+function parsePartIssueFilter(req: Request): partIssues.ListFilter {
+  const user = req.user!;
+  const q = req.query as Record<string, string | undefined>;
+
+  // Воркер видит только свой участок, менеджер — выданные ему (v5).
+  const siteIds =
+    user.role === "worker"
+      ? user.siteId != null
+        ? [user.siteId]
+        : []
+      : permissions.allowedSiteIds(user);
+
+  const filter: partIssues.ListFilter = { siteIds };
+
+  const siteId = Number(q.siteId);
+  if (Number.isInteger(siteId) && siteId > 0) filter.siteId = siteId;
+  if (q.dateFrom && isValidDate(q.dateFrom)) filter.dateFrom = q.dateFrom;
+  if (q.dateTo && isValidDate(q.dateTo)) filter.dateTo = q.dateTo;
+  if (q.search && q.search.trim()) filter.search = q.search.trim();
+  if (q.licensePlate && q.licensePlate.trim()) {
+    filter.licensePlate = q.licensePlate.trim();
+  }
+  const authorId = Number(q.authorId);
+  if (Number.isInteger(authorId) && authorId > 0) filter.authorId = authorId;
+
+  return filter;
+}
+
+// POST /api/gsm/part-issues — worker-only. Тело: {rows:[{partNumber,name,qty,licensePlate,recipient}]}.
+// Серия пишется одной транзакцией. Дата — todayMsk(), участок — из сессии.
+gsmRouter.post(
+  "/api/gsm/part-issues",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    const user = req.user!;
+    // Вносит только механик своего участка (канон: менеджер здесь только читает).
+    if (user.role !== "worker" || user.siteId == null) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as { rows?: unknown };
+    if (!Array.isArray(body.rows) || body.rows.length === 0) {
+      res.status(400).json({ error: "empty_rows" });
+      return;
+    }
+
+    const rows: partIssues.PartIssueInput[] = [];
+    for (const raw of body.rows as unknown[]) {
+      if (!raw || typeof raw !== "object") {
+        res.status(400).json({ error: "invalid_row" });
+        return;
+      }
+      const r = raw as {
+        partNumber?: unknown;
+        name?: unknown;
+        qty?: unknown;
+        licensePlate?: unknown;
+        recipient?: unknown;
+      };
+      rows.push({
+        partNumber: typeof r.partNumber === "string" ? r.partNumber : "",
+        name: typeof r.name === "string" ? r.name : "",
+        qty: typeof r.qty === "number" ? r.qty : Number(r.qty),
+        licensePlate: typeof r.licensePlate === "string" ? r.licensePlate : "",
+        recipient: typeof r.recipient === "string" ? r.recipient : "",
+      });
+    }
+
+    const result = partIssues.createMany(rows, {
+      siteId: user.siteId,
+      issueDate: todayMsk(),
+      createdBy: user.id,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.status(201).json({ created: result.created });
+  },
+);
+
+// GET /api/gsm/part-issues — auth. Журнал в области видимости пользователя.
+// Фильтры (query): siteId, dateFrom, dateTo, search, licensePlate, authorId.
+gsmRouter.get(
+  "/api/gsm/part-issues",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    res
+      .status(200)
+      .json({ issues: partIssues.list(parsePartIssueFilter(req)) });
+  },
+);
+
+// GET /api/gsm/part-issues/export — manager. Тот же фильтр, но xlsx-файлом.
+gsmRouter.get(
+  "/api/gsm/part-issues/export",
+  requireAuth,
+  requireManager,
+  async (req: Request, res: Response): Promise<void> => {
+    const rows = partIssues.list(parsePartIssueFilter(req));
+    const buf = await createPartIssuesXlsx(rows);
+    const filename = `rashod-materialov-${todayMsk()}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.status(200).send(buf);
+  },
+);
+
+// POST /api/gsm/part-issues/:id/correct — manager. Отмена/правка записи.
+// Тело: {action:'void'} | {action:'edit', issueDate?, partNumber?, name?, qty?,
+// licensePlate?, recipient?}. Механику недоступно: он только вносит.
+gsmRouter.post(
+  "/api/gsm/part-issues/:id/correct",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    // Запись чужого участка маскируем под 404 (единая конвенция роутов).
+    const existing = partIssues.getById(id);
+    if (!existing || !permissions.canAccessSite(req.user!, existing.siteId)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as {
+      action?: unknown;
+      issueDate?: unknown;
+      partNumber?: unknown;
+      name?: unknown;
+      qty?: unknown;
+      licensePlate?: unknown;
+      recipient?: unknown;
+    };
+
+    let input: partIssues.CorrectionInput;
+    if (body.action === "void") {
+      input = { action: "void" };
+    } else if (body.action === "edit") {
+      input = { action: "edit" };
+      if (body.issueDate !== undefined) {
+        input.issueDate = typeof body.issueDate === "string" ? body.issueDate : "";
+      }
+      if (body.partNumber !== undefined) {
+        input.partNumber = typeof body.partNumber === "string" ? body.partNumber : "";
+      }
+      if (body.name !== undefined) {
+        input.name = typeof body.name === "string" ? body.name : "";
+      }
+      if (body.qty !== undefined) {
+        input.qty = typeof body.qty === "number" ? body.qty : Number(body.qty);
+      }
+      if (body.licensePlate !== undefined) {
+        input.licensePlate =
+          typeof body.licensePlate === "string" ? body.licensePlate : "";
+      }
+      if (body.recipient !== undefined) {
+        input.recipient = typeof body.recipient === "string" ? body.recipient : "";
+      }
+    } else {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = partIssues.correct(id, input, req.user!.id);
+    if (result.ok) {
+      res.status(201).json({ id: result.id });
+      return;
+    }
+    switch (result.error) {
+      case "not_found":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "already_voided":
+        res.status(409).json({ error: "already_voided" });
+        return;
+      case "invalid":
+        res.status(400).json({ error: "invalid" });
+        return;
+    }
   },
 );

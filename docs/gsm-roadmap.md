@@ -91,7 +91,7 @@ CREATE TRIGGER IF NOT EXISTS writeoffs_no_delete BEFORE DELETE ON writeoffs BEGI
 
 Остаток партии = `qty_initial − Σ writeoffs.qty`. `created_at` — только технический аудит, **никогда не выводится**; порядок событий одного дня — по `id` (порядок вставки).
 
-**Схема v4 — corrections (сторно/правка менеджером).** Append-only сохраняется: правка/отмена записи = НОВАЯ строка в `corrections`, никаких UPDATE receipts/writeoffs.
+**Схема v4 — corrections (отмена/правка менеджером).** Append-only сохраняется: правка/отмена записи = НОВАЯ строка в `corrections`, никаких UPDATE receipts/writeoffs.
 
 ```sql
 CREATE TABLE IF NOT EXISTS corrections (
@@ -146,8 +146,8 @@ type HistoryEvent = { kind:'receipt'|'writeoff'; date:string; qty:number; balanc
 | `GET /api/gsm/employees` | manager | → `{employees:[{id,username,displayName,site}]}` | только активные |
 | `POST /api/gsm/employees` | manager | `{username,password,displayName,site}` → `201 {id}` / `409` / `400` | роль форсится `worker`; `site∈LOTS`; пароль≥6; занятый логин → реактивация или 409 |
 | `DELETE /api/gsm/employees/:id` | manager | → `204` | `is_active=0`, только `role='worker'` |
-| `POST /api/gsm/writeoffs/:id/correct` | manager | `{action:'void'}` \| `{action:'edit', date?, amount?, licensePlate?, reason?}` → `201 {id}` / `400 invalid` / `404` / `409 {error[,balance]}` | v4: сторно/правка списания; `transfer_locked`/`already_voided`/`exceeds+balance` → 409 |
-| `POST /api/gsm/receipts/:id/correct` | manager | `{action:'void'}` \| `{action:'edit', receivedDate?, name?, code?, unit?, quantity?}` → `201 {id}` / `400 invalid` / `404` / `409 {error[,balance]}` | v4: сторно/правка партии (участок не меняется); + `has_writeoffs` → 409 |
+| `POST /api/gsm/writeoffs/:id/correct` | manager | `{action:'void'}` \| `{action:'edit', date?, amount?, licensePlate?, reason?}` → `201 {id}` / `400 invalid` / `404` / `409 {error[,balance]}` | v4: отмена/правка списания; `transfer_locked`/`already_voided`/`exceeds+balance` → 409 |
+| `POST /api/gsm/receipts/:id/correct` | manager | `{action:'void'}` \| `{action:'edit', receivedDate?, name?, code?, unit?, quantity?}` → `201 {id}` / `400 invalid` / `404` / `409 {error[,balance]}` | v4: отмена/правка партии (участок не меняется); + `has_writeoffs` → 409 |
 
 ## 5. Контракты модулей (сигнатуры — чтобы слои стыковались)
 
@@ -262,3 +262,32 @@ CRUD `/initiators` (initiators.manage) и ПУБЛИЧНЫЙ `GET /api/initiator
 кнопки-вкладки, на мобильном — компактный `<select>`, а имя пользователя скрывается,
 чтобы выпадашке хватило ширины. Страница механика (`EmployeePage`) не менялась:
 без слота `nav` хедер выглядит как раньше.
+
+## 10. Расход штучных материалов (v6)
+
+Отдельный журнал выдачи деталей: **без прихода, партий и остатков**. Учёт ГСМ не
+затрагивается ни одной строкой — миграция только добавляет таблицы.
+
+`part_issues`: `site_id` (из сессии механика), `issue_date` (ставит СЕРВЕР —
+`todayMsk()`, из тела запроса не принимается, поэтому задним числом внести нельзя),
+`part_number`, `name`, `qty` (INTEGER > 0 — только целые штуки), `license_plate`,
+`recipient`, `created_by`, `created_at`.
+
+`part_issue_corrections`: правки и отмена менеджером, append-only, действует последняя
+корректировка. Заведена отдельно от `corrections`: у той `CHECK (target_kind IN
+('receipt','writeoff'))`, а менять CHECK в SQLite можно только rebuild'ом боевой
+append-only таблицы. Обе новые таблицы под no-update/no-delete триггерами.
+
+Роли: вносит ТОЛЬКО механик (менеджер на POST получает 403), правит и отменяет записи
+ТОЛЬКО менеджер в пределах своих участков; запись чужого участка — 404. Новых прав
+в матрицу не добавлялось.
+
+Роуты: `POST /api/gsm/part-issues` (серия одной транзакцией), `GET /api/gsm/part-issues`
+(фильтры: siteId, dateFrom, dateTo, search, licensePlate, authorId — по ЭФФЕКТИВНЫМ
+значениям), `POST /api/gsm/part-issues/:id/correct`, `GET /api/gsm/part-issues/export`
+(xlsx по текущему фильтру).
+
+UI: маршрут `/gsm/parts` — у механика форма ввода + его записи, у менеджера таблица
+с фильтрами, правкой, отменой и выгрузкой. У механика в хедере появились две вкладки
+(«ГСМ» / «Материалы»), остальное в его интерфейсе не менялось. Отменённые строки
+не скрываются — показываются зачёркнутыми и не входят в итог по количеству.

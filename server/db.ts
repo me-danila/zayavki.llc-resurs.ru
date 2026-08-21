@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_transfers_from     ON transfers(from_receipt_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_to       ON transfers(to_receipt_id);
 CREATE INDEX IF NOT EXISTS idx_transfers_writeoff ON transfers(writeoff_id);
 
--- corrections: сторно/правка записей менеджером (v4). Append-only сохраняется:
+-- corrections: отмена/правка записей менеджером (v4). Append-only сохраняется:
 -- правка/отмена = НОВАЯ строка, никаких UPDATE receipts/writeoffs.
 -- На одну запись может быть несколько корректировок; ДЕЙСТВУЕТ ПОСЛЕДНЯЯ
 -- (max id per (target_kind, target_id)). action='void' — все new_* NULL.
@@ -288,6 +288,59 @@ function backfillManagerGrants() {
   `);
 }
 
+// Расход штучных материалов (v6). Полностью независим от учёта ГСМ: нет прихода,
+// нет партий, нет остатков — только журнал выдач. Ни одна таблица ГСМ не затрагивается.
+// Вносит ТОЛЬКО механик, дату ставит сервер (сегодня), участок берётся из сессии.
+// Правки/отмена — менеджером, append-only через part_issue_corrections.
+const PARTS_DDL = `
+CREATE TABLE IF NOT EXISTS part_issues (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id       INTEGER NOT NULL REFERENCES sites(id),
+  -- День выдачи. Формат как в receipts/writeoffs: классы [0-9], т.к. в SQLite
+  -- GLOB '_' — литерал, а не wildcard.
+  issue_date    TEXT NOT NULL CHECK (issue_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  part_number   TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  -- Штучные материалы: только целые количества.
+  qty           INTEGER NOT NULL CHECK (qty > 0 AND qty = CAST(qty AS INTEGER)),
+  license_plate TEXT NOT NULL,
+  recipient     TEXT NOT NULL,
+  created_by    INTEGER NOT NULL REFERENCES users(id),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_part_issues_site_date ON part_issues(site_id, issue_date);
+CREATE INDEX IF NOT EXISTS idx_part_issues_part      ON part_issues(part_number);
+CREATE INDEX IF NOT EXISTS idx_part_issues_plate     ON part_issues(license_plate);
+CREATE INDEX IF NOT EXISTS idx_part_issues_cby       ON part_issues(created_by);
+
+-- Корректировки расхода. Отдельно от corrections: у той CHECK на ('receipt','writeoff'),
+-- а менять CHECK в SQLite можно только rebuild'ом боевой append-only таблицы.
+-- Действует ПОСЛЕДНЯЯ корректировка (max id per target_id). action='void' — все new_* NULL.
+-- action='edit' — снапшот ВСЕХ полей итогового состояния, поэтому выборкам
+-- достаточно посмотреть одну последнюю строку.
+CREATE TABLE IF NOT EXISTS part_issue_corrections (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_id         INTEGER NOT NULL REFERENCES part_issues(id),
+  action            TEXT NOT NULL CHECK (action IN ('void','edit')),
+  new_date          TEXT CHECK (new_date IS NULL OR new_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  new_part_number   TEXT,
+  new_name          TEXT,
+  new_qty           INTEGER CHECK (new_qty IS NULL OR (new_qty > 0 AND new_qty = CAST(new_qty AS INTEGER))),
+  new_license_plate TEXT,
+  new_recipient     TEXT,
+  created_by        INTEGER NOT NULL REFERENCES users(id),
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_part_corr_target ON part_issue_corrections(target_id);
+
+CREATE TRIGGER IF NOT EXISTS part_issues_no_update BEFORE UPDATE ON part_issues BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS part_issues_no_delete BEFORE DELETE ON part_issues BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS part_corr_no_update BEFORE UPDATE ON part_issue_corrections BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS part_corr_no_delete BEFORE DELETE ON part_issue_corrections BEGIN SELECT RAISE(ABORT,'append-only'); END;
+`;
+
 function hasColumn(table: string, column: string): boolean {
   const cols = db
     .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
@@ -419,6 +472,8 @@ export function bootstrap() {
   if (prevVersion < SCHEMA_VERSION) backfillManagerGrants();
   // 8. Индексы и триггеры (после возможного rebuild таблиц).
   db.exec(INDEXES_TRIGGERS_DDL);
+  // 9. Расход штучных материалов (v6) — аддитивно, существующие таблицы не трогает.
+  db.exec(PARTS_DDL);
 
   if (prevVersion < SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

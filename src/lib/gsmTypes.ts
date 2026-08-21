@@ -62,6 +62,45 @@ export type Initiator = {
   active: boolean;
 };
 
+// Расход штучных материалов (v6). Значения ЭФФЕКТИВНЫЕ (с учётом корректировки);
+// voided=true — запись отменена, показываем зачёркнутой.
+export type PartIssue = {
+  id: number;
+  siteId: number;
+  siteName: string;
+  issueDate: string;
+  partNumber: string;
+  name: string;
+  qty: number;
+  licensePlate: string;
+  recipient: string;
+  voided: boolean;
+  author: { username: string; displayName: string | null };
+  correction?: {
+    action: 'void' | 'edit';
+    date: string;
+    author: { username: string; displayName: string | null };
+    original: {
+      issueDate: string;
+      partNumber: string;
+      name: string;
+      qty: number;
+      licensePlate: string;
+      recipient: string;
+    };
+  };
+};
+
+// Фильтр журнала расхода (query-параметры GET /part-issues).
+export type PartIssueFilter = {
+  siteId?: number;
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+  licensePlate?: string;
+  authorId?: number;
+};
+
 export type Lot = {
   id: number;
   name: string;
@@ -85,7 +124,7 @@ export type HistoryEvent = {
   // На чей участок ушло (transfer_out) / с чьего пришло (transfer_in).
   counterSiteName?: string;
   author: { username: string; displayName: string | null };
-  // id списания — для кнопок сторно/правки (у прихода есть id партии).
+  // id списания — для кнопок отмены/правки (у прихода есть id партии).
   writeoffId?: number;
   // Действующая корректировка (v4): значения события уже эффективные,
   // original — то, что было ДО корректировки; date — день правки (YYYY-MM-DD).

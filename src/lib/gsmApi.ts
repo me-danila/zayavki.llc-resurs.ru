@@ -11,6 +11,8 @@ import type {
   AdminUser,
   Initiator,
   Permission,
+  PartIssue,
+  PartIssueFilter,
 } from './gsmTypes';
 
 const BASE = '/api/gsm';
@@ -219,7 +221,7 @@ export async function getHistory(
 
 // --- Корректировки (manager-only) ---
 
-// Тело POST /writeoffs/:id/correct: сторно (void) или правка полей списания (edit).
+// Тело POST /writeoffs/:id/correct: отмена записи (void) или правка полей списания (edit).
 export type WriteoffCorrectPayload =
   | { action: 'void' }
   | {
@@ -259,7 +261,7 @@ export type ReceiptCorrectPayload =
     };
 
 // POST /receipts/:id/correct → 201 {id}. Ошибки — как у correctWriteoff,
-// плюс 409 {error:'has_writeoffs'} (сторно прихода, по которому есть списания).
+// плюс 409 {error:'has_writeoffs'} (отмена прихода, по которому есть списания).
 export async function correctReceipt(
   id: number,
   body: ReceiptCorrectPayload
@@ -420,4 +422,76 @@ export async function archiveInitiator(id: number): Promise<void> {
 // POST /initiators/:id/restore → 204.
 export async function restoreInitiator(id: number): Promise<void> {
   await request<void>(`/initiators/${id}/restore`, { method: 'POST' });
+}
+
+// --- Расход штучных материалов (v6) ---
+
+// Сборка query-строки фильтра: пустые значения не отправляем.
+function partIssueQuery(filter: PartIssueFilter): string {
+  const q = new URLSearchParams();
+  if (filter.siteId) q.set('siteId', String(filter.siteId));
+  if (filter.dateFrom) q.set('dateFrom', filter.dateFrom);
+  if (filter.dateTo) q.set('dateTo', filter.dateTo);
+  if (filter.search?.trim()) q.set('search', filter.search.trim());
+  if (filter.licensePlate?.trim()) q.set('licensePlate', filter.licensePlate.trim());
+  if (filter.authorId) q.set('authorId', String(filter.authorId));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+// GET /part-issues → PartIssue[]. Сервер сам режет по участкам роли.
+export async function getPartIssues(
+  filter: PartIssueFilter = {},
+): Promise<PartIssue[]> {
+  const { data } = await request<{ issues: PartIssue[] }>(
+    `/part-issues${partIssueQuery(filter)}`,
+  );
+  return data.issues;
+}
+
+// POST /part-issues — worker-only. Дату и участок ставит сервер, отправлять их не нужно.
+// 400 empty_rows | invalid_row, 403 forbidden → ApiError.
+export async function createPartIssues(
+  rows: Array<{
+    partNumber: string;
+    name: string;
+    qty: number;
+    licensePlate: string;
+    recipient: string;
+  }>,
+): Promise<{ created: number }> {
+  const { data } = await request<{ created: number }>('/part-issues', {
+    method: 'POST',
+    body: { rows },
+  });
+  return data;
+}
+
+// POST /part-issues/:id/correct — manager. Отмена записи или правка.
+// 404 not_found, 409 already_voided, 400 invalid → ApiError.
+export async function correctPartIssue(
+  id: number,
+  input:
+    | { action: 'void' }
+    | {
+        action: 'edit';
+        issueDate?: string;
+        partNumber?: string;
+        name?: string;
+        qty?: number;
+        licensePlate?: string;
+        recipient?: string;
+      },
+): Promise<{ id: number }> {
+  const { data } = await request<{ id: number }>(`/part-issues/${id}/correct`, {
+    method: 'POST',
+    body: input,
+  });
+  return data;
+}
+
+// Ссылка на выгрузку xlsx по текущему фильтру. Скачивание идёт обычным переходом
+// браузера (cookie-сессия отправится сама), поэтому тут только URL.
+export function partIssuesExportUrl(filter: PartIssueFilter = {}): string {
+  return `${BASE}/part-issues/export${partIssueQuery(filter)}`;
 }

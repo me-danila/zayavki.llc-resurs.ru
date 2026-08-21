@@ -1,4 +1,4 @@
-// Репозиторий корректировок (v4). Сторно (void) и правка (edit) записей
+// Репозиторий корректировок (v4). Отмена записи (void) и правка (edit) записей
 // receipts/writeoffs менеджером БЕЗ UPDATE: каждая корректировка — новая строка
 // в corrections, действует последняя (max id per (target_kind, target_id)).
 // При action='edit' заполняем ВСЕ new_*-поля целевого типа СНАПШОТОМ итогового
@@ -329,7 +329,7 @@ export function correctReceipt(
     }
 
     if (input.action === "void") {
-      // Сторно партии допустимо только без активных (не-voided) списаний.
+      // Отмена партии допустимо только без активных (не-voided) списаний.
       if (rcpt.has_active_writeoffs) {
         db.exec("ROLLBACK");
         return { ok: false, error: "has_writeoffs" };
