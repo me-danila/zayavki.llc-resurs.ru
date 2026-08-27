@@ -7,6 +7,7 @@
 import { Router, type Request, type Response } from "express";
 import {
   assertSiteAllowed,
+  assertTransferTargetAllowed,
   requireAuth,
   requireManager,
   requirePermission,
@@ -77,14 +78,31 @@ gsmRouter.get(
   },
 );
 
-// GET /api/gsm/sites/active — auth (worker + manager). Только активные участки.
-// Нужен для выпадашки целевого участка перемещения у ОБЕИХ ролей
-// (воркеру /api/gsm/sites под requireManager недоступен).
+// GET /api/gsm/sites/active — auth (worker + manager). Активные участки
+// В ОБЛАСТИ ВИДИМОСТИ (приход, привязка сотрудников, фильтры).
+// Для выпадашки ЦЕЛИ перемещения он не годится — см. /sites/transfer-targets ниже.
 gsmRouter.get(
   "/api/gsm/sites/active",
   requireAuth,
   (req: Request, res: Response): void => {
     const onlyIds = permissions.allowedSiteIds(req.user!);
+    res
+      .status(200)
+      .json({ sites: sites.list({ includeArchived: false, onlyIds }) });
+  },
+);
+
+// GET /api/gsm/sites/transfer-targets — auth (worker + manager).
+// Участки, куда пользователю можно ОТПРАВИТЬ партию: только активные и только
+// из области целей (v7 — все активные, см. repo/permissions.ts). Отдельно от
+// /sites/active, потому что цель перемещения всегда вне области видимости:
+// фильтр по user_sites оставлял бы отправителю ровно его собственный участок.
+// Отдаём только id+name — остатки и история чужого участка остаются закрыты.
+gsmRouter.get(
+  "/api/gsm/sites/transfer-targets",
+  requireAuth,
+  (req: Request, res: Response): void => {
+    const onlyIds = permissions.transferTargetSiteIds(req.user!);
     res
       .status(200)
       .json({ sites: sites.list({ includeArchived: false, onlyIds }) });
@@ -405,14 +423,17 @@ gsmRouter.post(
     const qty = typeof body.qty === "number" ? body.qty : Number(body.qty);
     const date = typeof body.date === "string" ? body.date : "";
 
-    // v5: исходная партия вне области видимости — маскируем под 404 (как чужой :id),
-    // недоступный целевой участок — явный 403 forbidden_site.
+    // Источник — по области ВИДИМОСТИ: чужая партия маскируется под 404 (как чужой :id).
+    // Цель — по области ЦЕЛЕЙ (шире, v7 = любой активный участок): вне неё 403 forbidden_site.
     const sourceLot = lots.getById(id);
     if (sourceLot && !permissions.canAccessSite(user, sourceLot.siteId)) {
       res.status(404).json({ error: "not_found" });
       return;
     }
-    if (Number.isInteger(toSiteId) && !assertSiteAllowed(req, res, toSiteId)) {
+    if (
+      Number.isInteger(toSiteId) &&
+      !assertTransferTargetAllowed(req, res, toSiteId)
+    ) {
       return;
     }
 

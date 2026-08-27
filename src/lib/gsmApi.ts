@@ -124,10 +124,22 @@ export async function restoreSite(id: number): Promise<void> {
   await request<void>(`/sites/${id}/restore`, { method: 'POST' });
 }
 
-// GET /sites/active → Site[] активных. requireAuth: доступно ОБЕИМ ролям
-// (воркеру /sites недоступен) — для выпадашки целевого участка перемещения.
+// GET /sites/active → Site[] активных В ОБЛАСТИ ВИДИМОСТИ. requireAuth:
+// доступно ОБЕИМ ролям (воркеру /sites недоступен).
 export async function getActiveSites(): Promise<Site[]> {
   const { data } = await request<{ sites: Site[] }>('/sites/active');
+  return data.sites.map((s) => ({
+    id: s.id,
+    name: s.name,
+    active: Boolean(s.active),
+  }));
+}
+
+// GET /sites/transfer-targets → Site[] участков, куда можно ОТПРАВИТЬ партию.
+// Именно этот список идёт в выпадашку TransferForm: область целей шире области
+// видимости (цель перемещения всегда чужой участок), поэтому не /sites/active.
+export async function getTransferTargets(): Promise<Site[]> {
+  const { data } = await request<{ sites: Site[] }>('/sites/transfer-targets');
   return data.sites.map((s) => ({
     id: s.id,
     name: s.name,

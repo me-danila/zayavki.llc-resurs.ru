@@ -109,3 +109,26 @@ export function canAccessSite(user: User, siteId: number): boolean {
   const allowed = allowedSiteIds(user);
   return allowed === null || allowed.includes(siteId);
 }
+
+// --- Цели перемещения -------------------------------------------------------
+
+// Область участков-ЦЕЛЕЙ перемещения. Намеренно шире области видимости:
+// цель перемещения по определению чужой участок (свой → same_site), поэтому
+// фильтр по user_sites здесь неприменим — у воркера остаётся ровно свой участок,
+// и выпадашка целей пустеет (регрессия v5).
+// Политика v7: отправить партию можно на любой АКТИВНЫЙ участок, всем ролям.
+// Видимость не расширяется: чужие остатки и история по-прежнему недоступны,
+// участок-цель для отправителя остаётся «чёрным ящиком».
+// Если однажды понадобится сузить — возвращать отсюда список id (null = все).
+// Параметр держим в сигнатуре: сужение целей по пользователю — единственная
+// точка правки политики, менять придётся тело, а не всех вызывающих.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function transferTargetSiteIds(_user: User): number[] | null {
+  return null;
+}
+
+// Разрешён ли участок как ЦЕЛЬ перемещения (парная canAccessSite проверка).
+export function canTransferToSite(user: User, siteId: number): boolean {
+  const allowed = transferTargetSiteIds(user);
+  return allowed === null || allowed.includes(siteId);
+}

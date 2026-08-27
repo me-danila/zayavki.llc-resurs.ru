@@ -38,8 +38,11 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
   const path = useRoute();
   const [lots, setLots] = React.useState<Lot[] | null>(null);
   const [lotsError, setLotsError] = React.useState(false);
-  // Активные участки — опции форм прихода/перемещения/сотрудников и галочки доступов.
+  // Активные участки в области видимости — опции форм прихода/сотрудников и галочки доступов.
   const [activeSites, setActiveSites] = React.useState<Site[]>([]);
+  // Участки-ЦЕЛИ перемещения — отдельный список: он шире области видимости
+  // (цель перемещения по определению чужой участок), см. /sites/transfer-targets.
+  const [transferTargets, setTransferTargets] = React.useState<Site[]>([]);
 
   // refetch-функции для обновления после действий пользователя.
   const loadLots = React.useCallback(async () => {
@@ -57,6 +60,11 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
       setActiveSites(list.filter((s) => s.active));
     } catch {
       // молча — формы просто получат прежний список опций
+    }
+    try {
+      setTransferTargets(await api.getTransferTargets());
+    } catch {
+      // молча — выпадашка целей останется с прежним списком
     }
   }, []);
 
@@ -81,6 +89,14 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
       },
       () => {
         // молча — формы просто получат пустой список опций
+      },
+    );
+    void api.getTransferTargets().then(
+      (list) => {
+        if (alive) setTransferTargets(list);
+      },
+      () => {
+        // молча — выпадашка целей просто останется пустой
       },
     );
     return () => {
@@ -110,7 +126,7 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
           <StockPage
             lots={lots}
             lotsError={lotsError}
-            sites={activeSites}
+            transferSites={transferTargets}
             onChanged={loadLots}
           />
         )}

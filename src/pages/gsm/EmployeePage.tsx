@@ -19,7 +19,7 @@ import StockTable from '../../components/gsm/StockTable';
 import WriteOffForm from '../../components/gsm/WriteOffForm';
 import TransferForm from '../../components/gsm/TransferForm';
 import Modal from '../../components/gsm/Modal';
-import { getLots, getActiveSites } from '../../lib/gsmApi';
+import { getLots, getTransferTargets } from '../../lib/gsmApi';
 import type { Lot, Site, User } from '../../lib/gsmTypes';
 
 export interface EmployeePageProps {
@@ -37,8 +37,8 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
   // Партия, выбранная для списания / перемещения (открывает соответствующую модалку).
   const [selectedLot, setSelectedLot] = React.useState<Lot | null>(null);
   const [transferLot, setTransferLot] = React.useState<Lot | null>(null);
-  // Активные участки — опции целевого участка перемещения (воркеру доступно /sites/active).
-  const [activeSites, setActiveSites] = React.useState<Site[]>([]);
+  // Участки-цели перемещения (/sites/transfer-targets — шире своего участка).
+  const [transferTargets, setTransferTargets] = React.useState<Site[]>([]);
 
   const loadLots = React.useCallback(async () => {
     setError(false);
@@ -68,15 +68,15 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
     };
   }, []);
 
-  // Активные участки на mount (для выпадашки целевого участка перемещения).
+  // Участки-цели на mount (для выпадашки целевого участка перемещения).
   React.useEffect(() => {
     let alive = true;
-    getActiveSites()
+    getTransferTargets()
       .then((sites) => {
-        if (alive) setActiveSites(sites);
+        if (alive) setTransferTargets(sites);
       })
       .catch(() => {
-        if (alive) setActiveSites([]);
+        if (alive) setTransferTargets([]);
       });
     return () => {
       alive = false;
@@ -165,7 +165,7 @@ const EmployeePage: React.FC<EmployeePageProps> = ({ user, onLoggedOut }) => {
           <TransferForm
             key={transferLot.id}
             lot={transferLot}
-            sites={activeSites}
+            sites={transferTargets}
             onDone={handleTransferDone}
             onCancel={() => setTransferLot(null)}
             frameless

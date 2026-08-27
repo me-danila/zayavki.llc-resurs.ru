@@ -7,7 +7,11 @@
 import type { Request, Response, NextFunction } from "express";
 import * as sessions from "../repo/sessions";
 import type { Permission, User } from "../repo/types";
-import { canAccessSite, hasPermission } from "../repo/permissions";
+import {
+  canAccessSite,
+  canTransferToSite,
+  hasPermission,
+} from "../repo/permissions";
 import { parseCookies, SESSION_COOKIE } from "./cookies";
 
 // Augment Express.Request — req.user доступен во всех роутерах после attachUser.
@@ -96,6 +100,19 @@ export function assertSiteAllowed(
   siteId: number,
 ): boolean {
   if (canAccessSite(req.user!, siteId)) return true;
+  res.status(403).json({ error: "forbidden_site" });
+  return false;
+}
+
+// Гард ЦЕЛИ перемещения: область целей шире области видимости (см.
+// repo/permissions.ts → transferTargetSiteIds), поэтому отдельный гард, а не
+// assertSiteAllowed — иначе отправить партию можно только на свой же участок.
+export function assertTransferTargetAllowed(
+  req: Request,
+  res: Response,
+  siteId: number,
+): boolean {
+  if (canTransferToSite(req.user!, siteId)) return true;
   res.status(403).json({ error: "forbidden_site" });
   return false;
 }

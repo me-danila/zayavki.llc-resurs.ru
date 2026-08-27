@@ -13,14 +13,16 @@ export interface StockPageProps {
   // null — данные ещё грузятся (лэйаут держит их для всех разделов).
   lots: Lot[] | null;
   lotsError: boolean;
-  sites: Site[];
+  // Участки-ЦЕЛИ перемещения (/sites/transfer-targets), НЕ область видимости:
+  // отправить партию можно и на участок, остатки которого пользователю не видны.
+  transferSites: Site[];
   onChanged: () => void | Promise<void>;
 }
 
 const StockPage: React.FC<StockPageProps> = ({
   lots,
   lotsError,
-  sites,
+  transferSites,
   onChanged,
 }) => {
   // Партия, выбранная для перемещения (открывает TransferForm в модалке).
@@ -66,7 +68,7 @@ const StockPage: React.FC<StockPageProps> = ({
           <TransferForm
             key={transferLot.id}
             lot={transferLot}
-            sites={sites}
+            sites={transferSites}
             onDone={handleTransferDone}
             onCancel={() => setTransferLot(null)}
             frameless
