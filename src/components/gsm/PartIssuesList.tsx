@@ -6,6 +6,7 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 import * as api from '../../lib/gsmApi';
 import type { PartIssue } from '../../lib/gsmTypes';
+import { formatRu } from '../../lib/gsmDates';
 
 export interface PartIssuesListProps {
   reloadKey: number;
@@ -95,7 +96,7 @@ const PartIssuesList: React.FC<PartIssuesListProps> = ({ reloadKey }) => {
               >
                 {i.qty} шт
               </div>
-              <div className="text-[11px] text-gray-400">{i.issueDate}</div>
+              <div className="text-[11px] text-gray-400">{formatRu(i.issueDate)}</div>
             </div>
           </div>
         ))}

@@ -28,7 +28,7 @@ import {
 import type { ReceiptCorrectPayload } from '../../lib/gsmApi';
 import type { HistoryEvent, Lot } from '../../lib/gsmTypes';
 import { EPS } from '../../lib/gsmSchemas';
-import { todayMsk } from '../../lib/gsmDates';
+import { todayMsk, formatRu } from '../../lib/gsmDates';
 import { parseQuantity } from '../../lib/parseQuantity';
 import { LICENSE_PLATES } from '../../data/licenceNumberData';
 import { Combobox } from '../ui/Combobox';
@@ -141,7 +141,7 @@ const WriteoffVoidConfirm: React.FC<WriteoffVoidConfirmProps> = ({
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-700">
-        Отменить списание от {ev.date} на {fmtQty(ev.qty)} {unit}? Количество
+        Отменить списание от {formatRu(ev.date)} на {fmtQty(ev.qty)} {unit}? Количество
         вернётся в остаток партии.
       </p>
       {error && <p className="text-xs font-bold text-red-500">{error}</p>}
@@ -321,7 +321,7 @@ const VoidReceiptConfirm: React.FC<VoidReceiptConfirmProps> = ({
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-700">
-        Отменить приход «{lot.name}» от {lot.receivedDate}? Партия исчезнет из
+        Отменить приход «{lot.name}» от {formatRu(lot.receivedDate)}? Партия исчезнет из
         остатков.
       </p>
       {error && <p className="text-xs font-bold text-red-500">{error}</p>}
@@ -616,7 +616,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                     <span className="text-xs font-bold text-gray-700">
-                      {ev.date}
+                      {formatRu(ev.date)}
                     </span>
                     <span
                       className={`text-xs font-bold ${
@@ -638,12 +638,12 @@ const LotHistory: React.FC<LotHistoryProps> = ({
                     )}
                     {voided && corr && (
                       <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                        Отменено · {authorName(corr.author)} · {corr.date}
+                        Отменено · {authorName(corr.author)} · {formatRu(corr.date)}
                       </span>
                     )}
                     {edited && corr && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700">
-                        Исправлено · {authorName(corr.author)} · {corr.date}
+                        Исправлено · {authorName(corr.author)} · {formatRu(corr.date)}
                       </span>
                     )}
                   </div>
@@ -718,7 +718,7 @@ const LotHistory: React.FC<LotHistoryProps> = ({
         <Modal
           open
           onClose={() => setModal(null)}
-          title={`Редактирование списания от ${modal.ev.date}`}
+          title={`Редактирование списания от ${formatRu(modal.ev.date)}`}
         >
           <WriteoffEditForm
             ev={modal.ev}

@@ -447,6 +447,7 @@ function partIssueQuery(filter: PartIssueFilter): string {
   if (filter.search?.trim()) q.set('search', filter.search.trim());
   if (filter.licensePlate?.trim()) q.set('licensePlate', filter.licensePlate.trim());
   if (filter.authorId) q.set('authorId', String(filter.authorId));
+  if (filter.status) q.set('status', filter.status);
   const s = q.toString();
   return s ? `?${s}` : '';
 }
@@ -500,6 +501,20 @@ export async function correctPartIssue(
   const { data } = await request<{ id: number }>(`/part-issues/${id}/correct`, {
     method: 'POST',
     body: input,
+  });
+  return data;
+}
+
+// POST /part-issues/1c — manager. Пачкой помечает записи списанными в 1С
+// (exported=true) или возвращает их в актуальные (false).
+// 404 not_found, 409 voided, 400 invalid → ApiError.
+export async function setPartIssuesExported(
+  ids: number[],
+  exported: boolean,
+): Promise<{ updated: number }> {
+  const { data } = await request<{ updated: number }>('/part-issues/1c', {
+    method: 'POST',
+    body: { ids, exported },
   });
   return data;
 }

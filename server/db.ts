@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -357,6 +357,25 @@ CREATE TRIGGER IF NOT EXISTS part_corr_no_update BEFORE UPDATE ON part_issue_cor
 CREATE TRIGGER IF NOT EXISTS part_corr_no_delete BEFORE DELETE ON part_issue_corrections BEGIN SELECT RAISE(ABORT,'append-only'); END;
 `;
 
+// Отметка «списан в 1С» (v8). Отдельная таблица, а не колонка: part_issues
+// append-only (UPDATE запрещён триггером), да и знать надо не только факт, но и
+// кто с когда отметил. Действует ПОСЛЕДНЯЯ строка на target_id: action='mark' —
+// строка в архиве, action='unmark' — менеджер вернул её в актуальные.
+const PARTS_1C_DDL = `
+CREATE TABLE IF NOT EXISTS part_issue_1c (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_id  INTEGER NOT NULL REFERENCES part_issues(id),
+  action     TEXT NOT NULL CHECK (action IN ('mark','unmark')),
+  created_by INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_part_1c_target ON part_issue_1c(target_id);
+
+CREATE TRIGGER IF NOT EXISTS part_1c_no_update BEFORE UPDATE ON part_issue_1c BEGIN SELECT RAISE(ABORT,'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS part_1c_no_delete BEFORE DELETE ON part_issue_1c BEGIN SELECT RAISE(ABORT,'append-only'); END;
+`;
+
 function hasColumn(table: string, column: string): boolean {
   const cols = db
     .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
@@ -492,6 +511,8 @@ export function bootstrap() {
   db.exec(PARTS_DDL);
   // 10. v7: колонка comment у расхода материалов (ADD COLUMN, данные не трогает).
   migratePartIssueComment();
+  // 11. v8: отметки «списан в 1С» — новая таблица, существующие не трогает.
+  db.exec(PARTS_1C_DDL);
 
   if (prevVersion < SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

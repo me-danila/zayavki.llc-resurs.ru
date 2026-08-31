@@ -1,16 +1,24 @@
 // Журнал расхода штучных материалов для менеджера: фильтры, таблица, выгрузка xlsx,
-// правка и отмена строки.
+// правка и отмена строки, перенос выбранных записей в 1С.
+//
+// Статус — три взаимоисключающих состояния: «актуален» (в работе), «списан в 1С»
+// (архив) и «отменён». По умолчанию открывается «актуален», чтобы менеджер видел
+// только то, что ещё предстоит занести в 1С.
+//
+// Массово переносим в 1С, а возвращаем обратно только поштучно — из меню строки:
+// возврат из архива штучная операция, пачкой её делать незачем.
 //
 // Отменённые строки не прячем — показываем зачёркнутыми: менеджеру важно видеть,
 // что запись была и кто её отменил. У исправленных под строкой видно «было».
 // Сервер отдаёт только доступные участки, дополнительно на клиенте не режем.
 
 import React from 'react';
-import { Download, Loader2, Pencil, Ban, Search } from 'lucide-react';
+import { Download, Loader2, Pencil, Ban, Search, Upload, RotateCcw } from 'lucide-react';
 import * as api from '../../lib/gsmApi';
 import { ApiError } from '../../lib/gsmApi';
-import type { PartIssue, PartIssueFilter, Site } from '../../lib/gsmTypes';
+import type { PartIssue, PartIssueFilter, PartIssueStatus, Site } from '../../lib/gsmTypes';
 import { LICENSE_PLATES } from '../../data/licenceNumberData';
+import { formatRu } from '../../lib/gsmDates';
 import { Combobox } from '../ui/Combobox';
 import Modal from './Modal';
 import DotsMenu from './DotsMenu';
@@ -47,14 +55,30 @@ function authorName(a: { username: string; displayName: string | null }): string
   return a.displayName || a.username;
 }
 
+// Стартовый фильтр: показываем то, что ещё не занесено в 1С.
+const DEFAULT_FILTER: PartIssueFilter = { status: 'actual' };
+
+const STATUS_OPTIONS: Array<{ value: PartIssueStatus; label: string }> = [
+  { value: 'actual', label: 'Актуален' },
+  { value: 'exported', label: 'Списан в 1С' },
+  { value: 'voided', label: 'Отменён' },
+  { value: 'all', label: 'Все' },
+];
+
 const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
-  const [filter, setFilter] = React.useState<PartIssueFilter>({});
+  const [filter, setFilter] = React.useState<PartIssueFilter>(DEFAULT_FILTER);
   const [issues, setIssues] = React.useState<PartIssue[] | null>(null);
   const [listError, setListError] = React.useState(false);
 
   const [editing, setEditing] = React.useState<PartIssue | null>(null);
   const [draft, setDraft] = React.useState<EditDraft | null>(null);
   const [voiding, setVoiding] = React.useState<PartIssue | null>(null);
+  // Выбранные строки для переноса в 1С. Отменённые выбирать нельзя.
+  const [selected, setSelected] = React.useState<number[]>([]);
+  // Подтверждение массового списания выбранных строк в 1С.
+  const [confirmExport, setConfirmExport] = React.useState(false);
+  // Возврат из архива — поштучно, отдельной строкой из её меню.
+  const [unmarking, setUnmarking] = React.useState<PartIssue | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [actionError, setActionError] = React.useState<string | null>(null);
 
@@ -65,6 +89,8 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
     } catch {
       setListError(true);
     }
+    // Список пересобран — прежние id могли из него уйти, выделение сбрасываем.
+    setSelected([]);
   }, []);
 
   // Первичная загрузка и перезапрос при смене фильтра. setState только в колбэках
@@ -76,6 +102,7 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
         if (!alive) return;
         setIssues(list);
         setListError(false);
+        setSelected([]);
       },
       () => {
         if (alive) setListError(true);
@@ -93,6 +120,67 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
     () => (issues ?? []).filter((i) => !i.voided).reduce((s, i) => s + i.qty, 0),
     [issues],
   );
+
+  // Выбирать можно только рабочие строки: отменённые в 1С не переносят,
+  // а списанные возвращают поштучно через меню строки.
+  const selectable = React.useMemo(
+    () => (issues ?? []).filter((i) => !i.voided && !i.exported),
+    [issues],
+  );
+  const selectedIssues = React.useMemo(
+    () => (issues ?? []).filter((i) => selected.includes(i.id)),
+    [issues, selected],
+  );
+  const allSelected =
+    selectable.length > 0 && selectable.every((i) => selected.includes(i.id));
+
+  const toggleRow = (id: number) =>
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  const toggleAll = () =>
+    setSelected(allSelected ? [] : selectable.map((i) => i.id));
+
+  // Перенос выбранных в 1С. Выбрать можно только рабочие строки, так что
+  // фильтровать список повторно не нужно — сервер отбивает отменённые сам.
+  const onExport = async () => {
+    const ids = selectedIssues.map((i) => i.id);
+    if (!ids.length) {
+      setConfirmExport(false);
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.setPartIssuesExported(ids, true);
+      setConfirmExport(false);
+      await load(filter);
+    } catch (err) {
+      setActionError(
+        err instanceof ApiError && err.status === 409
+          ? 'Отменённые записи в 1С не переносятся.'
+          : 'Не удалось списать в 1С.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Возврат одной записи из архива в актуальные.
+  const onUnmark = async () => {
+    if (!unmarking) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.setPartIssuesExported([unmarking.id], false);
+      setUnmarking(null);
+      await load(filter);
+    } catch {
+      setActionError('Не удалось вернуть запись в актуальные.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const onSaveEdit = async () => {
     if (!editing || !draft) return;
@@ -210,6 +298,21 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
           </select>
         </div>
 
+        <div>
+          <label className="resource-label">Статус</label>
+          <select
+            value={filter.status ?? 'all'}
+            onChange={(e) => patchFilter({ status: e.target.value as PartIssueStatus })}
+            className="resource-input text-sm"
+          >
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="sm:col-span-2">
           <label className="resource-label">Гос. номер</label>
           <Combobox
@@ -223,7 +326,7 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
         <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-3">
           <button
             type="button"
-            onClick={() => setFilter({})}
+            onClick={() => setFilter(DEFAULT_FILTER)}
             className="h-10 rounded-lg border border-gray-200 bg-white px-4 text-xs font-bold uppercase tracking-widest text-gray-500 transition-colors hover:border-gray-300 hover:text-gray-900"
           >
             Сбросить
@@ -238,11 +341,42 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
         </div>
       </div>
 
+      {/* Массовое действие по выбранным строкам */}
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-900 px-4 py-3 text-white">
+          <span className="text-xs font-bold uppercase tracking-widest">
+            Выбрано записей: {selected.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelected([])}
+              className="h-9 rounded-lg px-3 text-xs font-bold uppercase tracking-widest text-gray-300 transition-colors hover:text-white"
+            >
+              Снять выделение
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmExport(true);
+                setActionError(null);
+              }}
+              className="flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-xs font-bold uppercase tracking-widest text-gray-900 transition-colors hover:bg-gray-100"
+            >
+              <Upload className="w-4 h-4" />
+              Списать в 1С
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Итог по отфильтрованному */}
       {issues !== null && !listError && (
         <p className="text-[11px] uppercase tracking-wide text-gray-400">
           Записей: {issues.length} · всего штук: {total}
-          {issues.some((i) => i.voided) && ' · отменённые показаны зачёркнутыми'}
+          {filter.status !== 'voided' &&
+            issues.some((i) => i.voided) &&
+            ' · отменённые показаны зачёркнутыми'}
         </p>
       )}
 
@@ -268,6 +402,16 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wide text-gray-400">
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      disabled={selectable.length === 0}
+                      aria-label="Выбрать все"
+                      className="h-4 w-4 cursor-pointer accent-gray-900 disabled:cursor-not-allowed"
+                    />
+                  </th>
                   <th className="px-4 py-2 text-left font-bold">Дата</th>
                   <th className="px-4 py-2 text-left font-bold">Участок</th>
                   <th className="px-4 py-2 text-left font-bold">Деталь</th>
@@ -280,9 +424,24 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {issues.map((i) => (
-                  <tr key={i.id} className={i.voided ? 'opacity-50' : ''}>
+                  <tr
+                    key={i.id}
+                    className={`${i.voided ? 'opacity-50' : ''} ${
+                      selected.includes(i.id) ? 'bg-gray-50' : ''
+                    }`}
+                  >
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(i.id)}
+                        onChange={() => toggleRow(i.id)}
+                        disabled={i.voided || i.exported}
+                        aria-label={`Выбрать ${i.name}`}
+                        className="h-4 w-4 cursor-pointer accent-gray-900 disabled:cursor-not-allowed"
+                      />
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-500">
-                      {i.issueDate}
+                      {formatRu(i.issueDate)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-gray-500">
                       {i.siteName}
@@ -313,6 +472,12 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
                           отменил {authorName(i.correction!.author)}
                         </div>
                       )}
+                      {i.exported && i.export1c && (
+                        <div className="mt-1 text-[11px] text-emerald-600">
+                          списан в 1С {formatRu(i.export1c.date)} ·{' '}
+                          {authorName(i.export1c.author)}
+                        </div>
+                      )}
                     </td>
                     <td
                       className={`whitespace-nowrap px-4 py-3 text-right font-bold ${
@@ -329,7 +494,23 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
                       {authorName(i.author)}
                     </td>
                     <td className="px-2 py-3">
-                      {!i.voided && (
+                      {/* Списанная в 1С строка правке не подлежит — только возврат. */}
+                      {!i.voided && i.exported && (
+                        <DotsMenu
+                          items={[
+                            {
+                              key: 'unmark',
+                              label: 'Вернуть в актуальные',
+                              icon: <RotateCcw className="w-4 h-4" />,
+                              onSelect: () => {
+                                setUnmarking(i);
+                                setActionError(null);
+                              },
+                            },
+                          ]}
+                        />
+                      )}
+                      {!i.voided && !i.exported && (
                         <DotsMenu
                           items={[
                             {
@@ -506,6 +687,85 @@ const PartIssuesTable: React.FC<PartIssuesTableProps> = ({ sites }) => {
                 className="flex h-10 items-center gap-2 rounded-lg bg-red-600 px-5 text-xs font-bold uppercase tracking-widest text-white hover:bg-red-700 disabled:opacity-50"
               >
                 Отменить запись
+                {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Подтверждение массового списания в 1С */}
+      {confirmExport && (
+        <Modal open onClose={() => setConfirmExport(false)} title="Списать в 1С">
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Отметить списанными в 1С: {selectedIssues.length} зап. на{' '}
+              {selectedIssues.reduce((sum, i) => sum + i.qty, 0)} шт.
+            </p>
+            <p className="text-[11px] text-gray-400">
+              Записи уйдут в архив и пропадут из фильтра «Актуален». Править и
+              отменять их будет нельзя — сначала придётся вернуть в актуальные,
+              по одной из меню строки.
+            </p>
+
+            {actionError && <p className="text-xs text-red-500">{actionError}</p>}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmExport(false)}
+                className="h-10 rounded-lg border border-gray-200 px-4 text-xs font-bold uppercase tracking-widest text-gray-500 hover:text-gray-900"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => void onExport()}
+                disabled={busy}
+                className="flex h-10 items-center gap-2 rounded-lg bg-gray-900 px-5 text-xs font-bold uppercase tracking-widest text-white hover:bg-black disabled:opacity-50"
+              >
+                Списать
+                {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Возврат одной записи из архива */}
+      {unmarking && (
+        <Modal
+          open
+          onClose={() => setUnmarking(null)}
+          title="Вернуть в актуальные"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              {unmarking.name} № {unmarking.partNumber}, {unmarking.qty} шт —{' '}
+              {unmarking.licensePlate}, {unmarking.recipient}.
+            </p>
+            <p className="text-[11px] text-gray-400">
+              Запись снова появится в фильтре «Актуален», правка и отмена станут
+              доступны. Данные, уже занесённые в 1С, приложение не меняет.
+            </p>
+
+            {actionError && <p className="text-xs text-red-500">{actionError}</p>}
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUnmarking(null)}
+                className="h-10 rounded-lg border border-gray-200 px-4 text-xs font-bold uppercase tracking-widest text-gray-500 hover:text-gray-900"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={() => void onUnmark()}
+                disabled={busy}
+                className="flex h-10 items-center gap-2 rounded-lg bg-gray-900 px-5 text-xs font-bold uppercase tracking-widest text-white hover:bg-black disabled:opacity-50"
+              >
+                Вернуть
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               </button>
             </div>

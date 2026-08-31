@@ -1195,6 +1195,15 @@ function parsePartIssueFilter(req: Request): partIssues.ListFilter {
   }
   const authorId = Number(q.authorId);
   if (Number.isInteger(authorId) && authorId > 0) filter.authorId = authorId;
+  // Статус переноса в 1С (v8). Без параметра — без ограничения (как до v8).
+  if (
+    q.status === "actual" ||
+    q.status === "voided" ||
+    q.status === "exported" ||
+    q.status === "all"
+  ) {
+    filter.status = q.status;
+  }
 
   return filter;
 }
@@ -1362,8 +1371,60 @@ gsmRouter.post(
       case "already_voided":
         res.status(409).json({ error: "already_voided" });
         return;
+      case "exported":
+        res.status(409).json({ error: "exported" });
+        return;
       case "invalid":
         res.status(400).json({ error: "invalid" });
+        return;
+    }
+  },
+);
+
+// POST /api/gsm/part-issues/1c — manager. Тело: {ids:number[], exported:boolean}.
+// Помечает строки списанными в 1С (или возвращает в актуальные) одной транзакцией.
+// Чужие участки маскируем под 404, как и в /correct.
+gsmRouter.post(
+  "/api/gsm/part-issues/1c",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const body = (req.body ?? {}) as { ids?: unknown; exported?: unknown };
+    if (!Array.isArray(body.ids) || typeof body.exported !== "boolean") {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const ids: number[] = [];
+    for (const raw of body.ids) {
+      const id = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ error: "invalid" });
+        return;
+      }
+      const existing = partIssues.getById(id);
+      if (!existing || !permissions.canAccessSite(req.user!, existing.siteId)) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      ids.push(id);
+    }
+    if (!ids.length) {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+
+    const result = partIssues.setExported(ids, body.exported, req.user!.id);
+    if (result.ok) {
+      res.status(201).json({ updated: result.updated });
+      return;
+    }
+    switch (result.error) {
+      case "not_found":
+        res.status(404).json({ error: "not_found" });
+        return;
+      case "voided":
+        res.status(409).json({ error: "voided" });
         return;
     }
   },

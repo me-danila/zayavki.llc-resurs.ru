@@ -95,7 +95,14 @@ export type PartIssue = {
   recipient: string;
   comment: string | null;
   voided: boolean;
+  // v8: строка отмечена как перенесённая в 1С — уходит в архив журнала.
+  exported: boolean;
   author: { username: string; displayName: string | null };
+  // Кто и когда отметил строку списанной в 1С (только когда exported=true).
+  export1c?: {
+    date: string;
+    author: { username: string; displayName: string | null };
+  };
   // Действующая корректировка: original — то, что было ДО правки.
   correction?: {
     action: "void" | "edit";

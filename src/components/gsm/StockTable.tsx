@@ -22,6 +22,7 @@ import type { Lot } from '../../lib/gsmTypes';
 import { EPS } from '../../lib/gsmSchemas';
 import LotHistory from './LotHistory';
 import DotsMenu from './DotsMenu';
+import { formatRu } from '../../lib/gsmDates';
 
 export interface StockTableProps {
   lots: Lot[];
@@ -393,7 +394,7 @@ const StockTable: React.FC<StockTableProps> = ({
                               </div>
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-gray-500">
-                              {lot.receivedDate}
+                              {formatRu(lot.receivedDate)}
                             </td>
                             <td className="px-4 py-3 text-gray-500">
                               {authorName(lot.author)}
@@ -523,7 +524,7 @@ const StockTable: React.FC<StockTableProps> = ({
                       </div>
 
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-gray-500">
-                        <span>Приход: {lot.receivedDate}</span>
+                        <span>Приход: {formatRu(lot.receivedDate)}</span>
                         <span>Автор: {authorName(lot.author)}</span>
                       </div>
 

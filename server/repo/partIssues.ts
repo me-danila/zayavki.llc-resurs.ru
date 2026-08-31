@@ -18,6 +18,14 @@ const CORR_JOIN = `
     WHERE c2.target_id = pi.id
   )`;
 
+// Последняя отметка «списан в 1С» (алиас px). action='mark' — строка в архиве,
+// 'unmark' — менеджер вернул её в актуальные; NULL — отметок не было.
+const EXPORT_JOIN = `
+  LEFT JOIN part_issue_1c px ON px.id = (
+    SELECT MAX(x2.id) FROM part_issue_1c x2
+    WHERE x2.target_id = pi.id
+  )`;
+
 type Row = {
   id: number;
   site_id: number;
@@ -30,6 +38,10 @@ type Row = {
   recipient: string;
   comment: string | null;
   voided: number;
+  exported: number;
+  exp_at: string | null;
+  exp_username: string | null;
+  exp_display_name: string | null;
   created_by: number;
   author_username: string | null;
   author_display_name: string | null;
@@ -60,6 +72,10 @@ const SELECT = `
          COALESCE(pc.new_recipient, pi.recipient)               AS recipient,
          CASE WHEN pc.action = 'edit' THEN pc.new_comment ELSE pi.comment END AS comment,
          CASE WHEN pc.action = 'void' THEN 1 ELSE 0 END         AS voided,
+         CASE WHEN px.action = 'mark' THEN 1 ELSE 0 END         AS exported,
+         px.created_at   AS exp_at,
+         xu.username     AS exp_username,
+         xu.display_name AS exp_display_name,
          pi.created_by,
          au.username     AS author_username,
          au.display_name AS author_display_name,
@@ -78,7 +94,9 @@ const SELECT = `
     JOIN sites s ON s.id = pi.site_id
     LEFT JOIN users au ON au.id = pi.created_by
     ${CORR_JOIN}
-    LEFT JOIN users cu ON cu.id = pc.created_by`;
+    LEFT JOIN users cu ON cu.id = pc.created_by
+    ${EXPORT_JOIN}
+    LEFT JOIN users xu ON xu.id = px.created_by`;
 
 function mapRow(r: Row): PartIssue {
   const issue: PartIssue = {
@@ -93,11 +111,21 @@ function mapRow(r: Row): PartIssue {
     recipient: r.recipient,
     comment: r.comment,
     voided: r.voided === 1,
+    exported: r.exported === 1,
     author: {
       username: r.author_username ?? "",
       displayName: r.author_display_name,
     },
   };
+  if (issue.exported) {
+    issue.export1c = {
+      date: (r.exp_at ?? "").slice(0, 10),
+      author: {
+        username: r.exp_username ?? "",
+        displayName: r.exp_display_name,
+      },
+    };
+  }
   if (r.corr_action) {
     issue.correction = {
       action: r.corr_action === "void" ? "void" : "edit",
@@ -189,6 +217,9 @@ export type ListFilter = {
   search?: string;
   licensePlate?: string;
   authorId?: number;
+  // v8: 'actual' — рабочие записи (не отменены и не в 1С), 'voided' — отменённые,
+  // 'exported' — списанные в 1С, 'all' — всё подряд.
+  status?: "actual" | "voided" | "exported" | "all";
 };
 
 // Журнал по фильтру. Сортировка: свежие сверху (по эффективной дате, затем id).
@@ -222,6 +253,17 @@ export function list(filter: ListFilter): PartIssue[] {
   if (filter.authorId != null) {
     conds.push("pi.created_by = ?");
     args.push(filter.authorId);
+  }
+  // Статус — одна ось из трёх взаимоисключающих состояний. Отмена главнее 1С:
+  // отменённую в 1С не переносят, так что пересечения не бывает.
+  // 'unmark' и отсутствие отметки равнозначны — записи нет в 1С.
+  if (filter.status === "exported") {
+    conds.push("px.action = 'mark'");
+  } else if (filter.status === "voided") {
+    conds.push("pc.action = 'void'");
+  } else if (filter.status === "actual") {
+    conds.push("(px.action IS NULL OR px.action = 'unmark')");
+    conds.push("(pc.action IS NULL OR pc.action <> 'void')");
   }
   if (filter.search) {
     const like = `%${filter.search.trim()}%`;
@@ -265,7 +307,7 @@ export type CorrectionInput =
 
 export type CorrectResult =
   | { ok: true; id: number }
-  | { ok: false; error: "not_found" | "already_voided" | "invalid" };
+  | { ok: false; error: "not_found" | "already_voided" | "invalid" | "exported" };
 
 // Корректировка записи менеджером. Как в ГСМ: никаких UPDATE — новая строка.
 // action='edit' пишет снапшот ВСЕХ полей итогового состояния, поэтому выборке
@@ -279,6 +321,9 @@ export function correct(
   if (!current) return { ok: false, error: "not_found" };
   // После отмены запись мертва: дальнейшие корректировки запрещены.
   if (current.voided) return { ok: false, error: "already_voided" };
+  // Списанную в 1С не трогаем: данные уже уехали в учёт. Сначала вернуть в
+  // актуальные (setExported), потом править.
+  if (current.exported) return { ok: false, error: "exported" };
 
   if (input.action === "void") {
     const res = db
@@ -325,4 +370,39 @@ export function correct(
     )
     .get(id, issueDate, partNumber, name, qty, licensePlate, recipient, comment, managerId)!;
   return { ok: true, id: res.id };
+}
+
+export type SetExportedResult =
+  | { ok: true; updated: number }
+  | { ok: false; error: "not_found" | "voided" };
+
+// Отметка «списан в 1С» / возврат в актуальные (v8), пачкой и одной транзакцией.
+// Как и корректировки — append-only: пишем новую строку, старые не трогаем.
+// Записи, уже находящиеся в нужном состоянии, пропускаем — дублей отметок не плодим.
+export function setExported(
+  ids: number[],
+  exported: boolean,
+  managerId: number,
+): SetExportedResult {
+  if (!ids.length) return { ok: true, updated: 0 };
+
+  const targets: number[] = [];
+  for (const id of ids) {
+    const current = getById(id);
+    if (!current) return { ok: false, error: "not_found" };
+    // Отменённую строку в 1С не переносим: списывать нечего.
+    if (exported && current.voided) return { ok: false, error: "voided" };
+    if (current.exported !== exported) targets.push(id);
+  }
+  if (!targets.length) return { ok: true, updated: 0 };
+
+  const ins = db.query<null, [number, string, number]>(
+    `INSERT INTO part_issue_1c (target_id, action, created_by) VALUES (?, ?, ?)`,
+  );
+  const action = exported ? "mark" : "unmark";
+  db.transaction(() => {
+    for (const id of targets) ins.run(id, action, managerId);
+  })();
+
+  return { ok: true, updated: targets.length };
 }

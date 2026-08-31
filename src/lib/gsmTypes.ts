@@ -76,7 +76,13 @@ export type PartIssue = {
   recipient: string;
   comment: string | null;
   voided: boolean;
+  // v8: строка перенесена в 1С — уходит в архив журнала, правка запрещена.
+  exported: boolean;
   author: { username: string; displayName: string | null };
+  export1c?: {
+    date: string;
+    author: { username: string; displayName: string | null };
+  };
   correction?: {
     action: 'void' | 'edit';
     date: string;
@@ -101,7 +107,11 @@ export type PartIssueFilter = {
   search?: string;
   licensePlate?: string;
   authorId?: number;
+  // Статус переноса в 1С. Без значения сервер отдаёт всё.
+  status?: PartIssueStatus;
 };
+
+export type PartIssueStatus = 'actual' | 'voided' | 'exported' | 'all';
 
 export type Lot = {
   id: number;
