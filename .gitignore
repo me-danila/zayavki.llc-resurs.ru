@@ -13,3 +13,6 @@ tmp/
 # БД ГСМ-товароучёта — данные не коммитим, но папку сохраняем
 server/data/*
 !server/data/.gitkeep
+
+# Каталог данных прода: bind mount ./data -> /app/server/data (см. compose)
+data/

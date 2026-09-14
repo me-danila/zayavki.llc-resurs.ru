@@ -1,16 +1,41 @@
-services:
-  app:
-    build: .
-    container_name: zayavki-app
-    restart: unless-stopped
-    ports:
-      - "${PORT:-3005}:${PORT:-3005}"
-    env_file:
-      - .env
-    environment:
-      - NODE_ENV=production
-    volumes:
-      - gsmdata:/app/server/data
+# Production deploy: docker compose up -d --build
+# Наружу торчит только web на ${WEB_PORT} — TLS и домен держит внешний
+# реверс-прокси, на самой машине веб-сервера нет.
+name: zayavki
 
-volumes:
-  gsmdata: {}
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  web:
+    build:
+      context: .
+      target: runtime
+    image: zayavki-web
+    restart: unless-stopped
+    logging: *logging
+    # Слева — порт на хосте, справа — фиксированный внутренний (см. Dockerfile).
+    ports:
+      - "${WEB_PORT:-3005}:3000"
+    env_file: .env
+    environment:
+      # `environment` сильнее `env_file`: внутренний порт нельзя отдавать на
+      # откуп .env, иначе публикация уйдёт мимо слушающего сокета.
+      PORT: 3000
+      NODE_ENV: production
+      # am работал в Europe/Moscow, resurs — в UTC. Деловые даты приложение
+      # считает через Intl с явной зоной, но метки в логах и имена выгрузок
+      # берут зону процесса — фиксируем, чтобы не поехали при переезде.
+      TZ: ${APP_TIMEZONE:-Europe/Moscow}
+    volumes:
+      # Bind mount, а не именованный том: файлы БД должны быть доступны с хоста
+      # обычному пользователю. Именованный том лежит в /var/lib/docker/volumes
+      # (drwx--x--- root), куда без root не зайти, — а бэкап по крону запускается
+      # без root. tabel монтирует ./backups ровно по этой причине.
+      # Каталог ./data обязан существовать ДО первого up и принадлежать
+      # пользователю с uid 1001: иначе Docker создаст его от root, и
+      # непривилегированный процесс в контейнере не сможет писать.
+      - ./data:/app/server/data
