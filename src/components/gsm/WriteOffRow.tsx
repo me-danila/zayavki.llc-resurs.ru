@@ -19,6 +19,7 @@ import type { WriteOffData } from '../../lib/gsmSchemas';
 interface WriteOffRowProps {
   index: number;
   lot: Lot;
+  allowBackdatedWriteoffs: boolean;
   running: number; // бегущий остаток после этой строки (NaN-безопасный, округлён родителем)
   canRemove: boolean;
   onRemove: () => void;
@@ -33,6 +34,7 @@ const fmtQty = (n: number): string => {
 const WriteOffRow: React.FC<WriteOffRowProps> = ({
   index,
   lot,
+  allowBackdatedWriteoffs,
   running,
   canRemove,
   onRemove,
@@ -56,7 +58,7 @@ const WriteOffRow: React.FC<WriteOffRowProps> = ({
           </label>
           <input
             type="date"
-            min={lot.receivedDate}
+            min={allowBackdatedWriteoffs ? lot.receivedDate : todayMsk()}
             max={todayMsk()}
             {...register(`rows.${index}.date`)}
             className="resource-input text-sm"

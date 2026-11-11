@@ -26,6 +26,7 @@ export type Site = {
   id: number;
   name: string;
   active: boolean;
+  allowBackdatedWriteoffs: boolean;
 };
 
 export type User = {

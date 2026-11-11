@@ -229,6 +229,27 @@ gsmRouter.patch(
   },
 );
 
+// Настройку меняет менеджер только в своей области видимости.
+gsmRouter.patch(
+  "/api/gsm/sites/:id/writeoff-policy",
+  requireAuth,
+  requireManager,
+  (req: Request, res: Response): void => {
+    const id = parseId(req.params.id);
+    if (id === null || !permissions.canAccessSite(req.user!, id) || !sites.getById(id)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const body = (req.body ?? {}) as { allowBackdatedWriteoffs?: unknown };
+    if (typeof body.allowBackdatedWriteoffs !== "boolean") {
+      res.status(400).json({ error: "invalid" });
+      return;
+    }
+    sites.setAllowBackdatedWriteoffs(id, body.allowBackdatedWriteoffs);
+    res.status(204).end();
+  },
+);
+
 // GET /api/gsm/lots — auth.
 // manager: все партии; worker: сервер фильтрует по session.siteId (query игнорируем).
 gsmRouter.get(
@@ -384,6 +405,9 @@ gsmRouter.post(
     }
 
     switch (result.error) {
+      case "backdating_forbidden":
+        res.status(403).json({ error: "backdating_forbidden" });
+        return;
       case "not_found":
         res.status(404).json({ error: "not_found" });
         return;

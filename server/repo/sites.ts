@@ -13,10 +13,16 @@ type SiteRow = {
   id: number;
   name: string;
   is_active: number;
+  allow_backdated_writeoffs: number;
 };
 
 function toSite(row: SiteRow): Site {
-  return { id: row.id, name: row.name, active: row.is_active === 1 };
+  return {
+    id: row.id,
+    name: row.name,
+    active: row.is_active === 1,
+    allowBackdatedWriteoffs: row.allow_backdated_writeoffs === 1,
+  };
 }
 
 // Список участков. По умолчанию все (активные+архивные); includeArchived:false — только активные.
@@ -38,7 +44,7 @@ export function list(opts?: {
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
   const rows = db
     .query<SiteRow, number[]>(
-      `SELECT id, name, is_active FROM sites ${where}
+      `SELECT id, name, is_active, allow_backdated_writeoffs FROM sites ${where}
        ORDER BY is_active DESC, name COLLATE NOCASE`,
     )
     .all(...(onlyIds ?? []));
@@ -48,7 +54,7 @@ export function list(opts?: {
 export function getById(id: number): Site | null {
   const row = db
     .query<SiteRow, [number]>(
-      "SELECT id, name, is_active FROM sites WHERE id = ?",
+      "SELECT id, name, is_active, allow_backdated_writeoffs FROM sites WHERE id = ?",
     )
     .get(id);
   return row ? toSite(row) : null;
@@ -153,4 +159,12 @@ export function rename(
 
   db.run("UPDATE sites SET name = ? WHERE id = ?", [trimmed, id]);
   return { ok: true };
+}
+
+// Политика действует для всех механиков участка, включая уже открытые сессии.
+export function setAllowBackdatedWriteoffs(id: number, allowed: boolean): boolean {
+  return db.run(
+    "UPDATE sites SET allow_backdated_writeoffs = ? WHERE id = ?",
+    [allowed ? 1 : 0, id],
+  ).changes > 0;
 }

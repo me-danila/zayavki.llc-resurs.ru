@@ -20,7 +20,7 @@ db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 db.exec("PRAGMA busy_timeout = 5000");
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 // Участки по умолчанию (бывший статичный LOTS) — засеваются при первом старте.
 const DEFAULT_SITES = [
@@ -504,7 +504,7 @@ export function bootstrap() {
   // 6. Справочник инициаторов (только в пустую таблицу).
   seedInitiators();
   // 7. Одноразовый бэкфилл прав существующим менеджерам при переходе на v5.
-  if (prevVersion < SCHEMA_VERSION) backfillManagerGrants();
+  if (prevVersion < 5) backfillManagerGrants();
   // 8. Индексы и триггеры (после возможного rebuild таблиц).
   db.exec(INDEXES_TRIGGERS_DDL);
   // 9. Расход штучных материалов (v6) — аддитивно, существующие таблицы не трогает.
@@ -513,6 +513,12 @@ export function bootstrap() {
   migratePartIssueComment();
   // 11. v8: отметки «списан в 1С» — новая таблица, существующие не трогает.
   db.exec(PARTS_1C_DDL);
+
+  // v9: разрешение списаний задним числом на уровне участка. Старое поведение сохраняется.
+  if (!hasColumn("sites", "allow_backdated_writeoffs")) {
+    db.exec(`ALTER TABLE sites ADD COLUMN allow_backdated_writeoffs
+      INTEGER NOT NULL DEFAULT 1 CHECK (allow_backdated_writeoffs IN (0,1))`);
+  }
 
   if (prevVersion < SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

@@ -17,6 +17,7 @@ export type CreateSeriesResult =
   | { ok: true; created: number }
   | { ok: false; error: "not_found" }
   | { ok: false; error: "date" }
+  | { ok: false; error: "backdating_forbidden" }
   | { ok: false; error: "exceeds"; balance: number };
 
 // Создать серию списаний по партии receiptId.
@@ -42,14 +43,16 @@ export function createSeries(
     // voided-партия «не существует» (нет строки → not_found).
     const lot = db
       .query<
-        { site_id: number; received_date: string; balance: number },
+        { site_id: number; received_date: string; balance: number; allow_backdated_writeoffs: number },
         [number]
       >(
         `SELECT
            r.site_id                              AS site_id,
+           s.allow_backdated_writeoffs,
            COALESCE(cr.new_date, r.received_date) AS received_date,
            ${BALANCE_EFF}                         AS balance
          FROM receipts r
+         JOIN sites s ON s.id = r.site_id
          ${RECEIPT_CORR_JOIN}
          WHERE r.id = ? AND ${RECEIPT_NOT_VOIDED}`,
       )
@@ -91,6 +94,11 @@ export function createSeries(
       ) {
         db.exec("ROLLBACK");
         return { ok: false, error: "date" };
+      }
+
+      if (lot.allow_backdated_writeoffs === 0 && r.date < today) {
+        db.exec("ROLLBACK");
+        return { ok: false, error: "backdating_forbidden" };
       }
 
       // Поля-строки должны быть непустыми.

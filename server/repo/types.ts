@@ -29,6 +29,7 @@ export type Site = {
   id: number;
   name: string;
   active: boolean;
+  allowBackdatedWriteoffs: boolean;
 };
 
 // Публичный тип пользователя (то, что отдаём наружу/кладём в сессию).

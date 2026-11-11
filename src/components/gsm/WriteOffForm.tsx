@@ -15,7 +15,8 @@ import { Plus, MinusCircle, X } from 'lucide-react';
 import { WriteOffSchema, EMPTY_WRITEOFF_ROW } from '../../lib/gsmSchemas';
 import type { WriteOffData } from '../../lib/gsmSchemas';
 import { parseQuantity } from '../../lib/parseQuantity';
-import { createWriteoffs } from '../../lib/gsmApi';
+import { createWriteoffs, getActiveSites } from '../../lib/gsmApi';
+import { todayMsk } from '../../lib/gsmDates';
 import { ApiError } from '../../lib/gsmApi';
 import type { Lot } from '../../lib/gsmTypes';
 import { SubmitFooter } from '../SubmitFooter';
@@ -44,9 +45,33 @@ const WriteOffForm: React.FC<WriteOffFormProps> = ({
 }) => {
   const [formError, setFormError] = React.useState<string | null>(null);
 
+  const [allowBackdatedWriteoffs, setAllowBackdatedWriteoffs] = React.useState<boolean | null>(null);
+  const [policyError, setPolicyError] = React.useState(false);
+  const [policyReload, setPolicyReload] = React.useState(0);
+
+  // Читаем актуальное правило при каждом открытии формы, а не из сессии.
+  React.useEffect(() => {
+    let alive = true;
+    void getActiveSites().then((sites) => {
+      if (!alive) return;
+      const site = sites.find((s) => s.id === lot.siteId);
+      if (!site) {
+        setPolicyError(true);
+        return;
+      }
+      setAllowBackdatedWriteoffs(site.allowBackdatedWriteoffs);
+      setPolicyError(false);
+    }, () => {
+      if (alive) setPolicyError(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [lot.siteId, policyReload]);
+
   const methods = useForm<WriteOffData>({
-    resolver: zodResolver(WriteOffSchema(lot)),
-    defaultValues: { rows: [EMPTY_WRITEOFF_ROW] } as WriteOffData,
+    resolver: zodResolver(WriteOffSchema(lot, allowBackdatedWriteoffs === true)),
+    defaultValues: { rows: [{ ...EMPTY_WRITEOFF_ROW, date: todayMsk() }] } as WriteOffData,
   });
 
   const {
@@ -78,6 +103,7 @@ const WriteOffForm: React.FC<WriteOffFormProps> = ({
 
   const onSubmit = async (data: WriteOffData) => {
     setFormError(null);
+    if (allowBackdatedWriteoffs === null) return;
     try {
       await createWriteoffs(
         lot.id,
@@ -98,6 +124,9 @@ const WriteOffForm: React.FC<WriteOffFormProps> = ({
             ? `Больше остатка (${fmtQty(balance)} ${lot.unit})`
             : 'Больше остатка'
         );
+      } else if (err instanceof ApiError && err.message === 'backdating_forbidden') {
+        setAllowBackdatedWriteoffs(false);
+        setFormError('Менеджер запретил списания задним числом. Выберите сегодняшнюю дату.');
       } else if (err instanceof ApiError && err.status === 404) {
         setFormError('Партия недоступна');
       } else {
@@ -142,31 +171,43 @@ const WriteOffForm: React.FC<WriteOffFormProps> = ({
           </div>
         )}
 
-        {/* Строки */}
-        <div className="space-y-4">
-          {fields.map((field, index) => (
-            <WriteOffRow
-              key={field.id}
-              index={index}
-              lot={lot}
-              running={running[index] ?? lot.balance}
-              canRemove={fields.length > 1}
-              onRemove={() => remove(index)}
-            />
-          ))}
-        </div>
+        {allowBackdatedWriteoffs === null && (
+          <div role="status" className="text-sm text-gray-500">
+            {policyError ? 'Не удалось загрузить правила списания.' : 'Загрузка правил списания…'}
+            {policyError && <button type="button" className="resource-button-secondary ml-3" onClick={() => setPolicyReload((n) => n + 1)}>Повторить</button>}
+          </div>
+        )}
+        {allowBackdatedWriteoffs === false && (
+          <p className="text-sm text-gray-500">Менеджер разрешил списания только сегодняшним числом по Москве.</p>
+        )}
+        <fieldset disabled={allowBackdatedWriteoffs === null} className="space-y-4 disabled:opacity-50">
+          {/* Строки */}
+          <div className="space-y-4">
+            {fields.map((field, index) => (
+              <WriteOffRow
+                key={field.id}
+                index={index}
+                lot={lot}
+                allowBackdatedWriteoffs={allowBackdatedWriteoffs === true}
+                running={running[index] ?? lot.balance}
+                canRemove={fields.length > 1}
+                onRemove={() => remove(index)}
+              />
+            ))}
+          </div>
 
-        {/* Добавить строку */}
-        <div className="flex justify-center">
-          <button
-            type="button"
-            onClick={() => append({ ...EMPTY_WRITEOFF_ROW })}
-            className="bg-white border-2 border-dashed border-gray-200 hover:border-resource-primary hover:text-resource-primary text-gray-400 w-full py-4 rounded-lg font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all cursor-pointer"
-          >
-            <Plus className="w-5 h-5" />
-            Добавить строку
-          </button>
-        </div>
+          {/* Добавить строку */}
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => append({ ...EMPTY_WRITEOFF_ROW, date: todayMsk() })}
+              className="bg-white border-2 border-dashed border-gray-200 hover:border-resource-primary hover:text-resource-primary text-gray-400 w-full py-4 rounded-lg font-bold text-xs uppercase flex items-center justify-center gap-2 transition-all cursor-pointer"
+            >
+              <Plus className="w-5 h-5" />
+              Добавить строку
+            </button>
+          </div>
+        </fieldset>
 
         {formError && (
           <p className="text-xs font-bold text-red-500">{formError}</p>
@@ -181,9 +222,9 @@ const WriteOffForm: React.FC<WriteOffFormProps> = ({
           >
             Отмена
           </button>
-          <div className="flex-1 w-full">
+          <fieldset disabled={allowBackdatedWriteoffs === null} className="flex-1 w-full">
             <SubmitFooter isSubmitting={isSubmitting} label="Сохранить списание" />
-          </div>
+          </fieldset>
         </div>
       </form>
     </FormProvider>

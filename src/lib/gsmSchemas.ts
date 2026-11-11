@@ -46,14 +46,14 @@ export type ReceiptData = z.infer<typeof ReceiptSchema>;
 // --- Списание (worker) — фабрика, привязанная к конкретной партии lot ---
 
 // Базовая строка зависит от lot: дата ∈ [receivedDate, today], сумма > 0.
-export function WriteOffRowSchema(lot: Lot) {
-  const today = todayMsk();
+export function WriteOffRowSchema(lot: Lot, allowBackdatedWriteoffs: boolean) {
   return z.object({
     date: z
       .string()
       .min(1, 'Укажите дату')
       .refine((d) => d >= lot.receivedDate, 'Раньше даты прихода')
-      .refine((d) => d <= today, 'Дата не может быть в будущем'),
+      .refine((d) => allowBackdatedWriteoffs || d >= todayMsk(), 'Списания задним числом запрещены менеджером')
+      .refine((d) => d <= todayMsk(), 'Дата не может быть в будущем'),
     plate: z.string().min(1, 'Укажите № авто'),
     amount: z
       .number({ message: 'Введите число' })
@@ -66,10 +66,10 @@ export type WriteOffRowData = z.infer<ReturnType<typeof WriteOffRowSchema>>;
 // Серия списаний по партии. superRefine проверяет НАРАСТАЮЩУЮ сумму:
 // после каждой строки накопленный итог не должен превышать lot.balance (с EPS).
 // Ошибка вешается на rows.i.amount — на ту строку, что вывела за остаток.
-export function WriteOffSchema(lot: Lot) {
+export function WriteOffSchema(lot: Lot, allowBackdatedWriteoffs: boolean) {
   return z
     .object({
-      rows: z.array(WriteOffRowSchema(lot)).min(1, 'Добавьте хотя бы одну строку'),
+      rows: z.array(WriteOffRowSchema(lot, allowBackdatedWriteoffs)).min(1, 'Добавьте хотя бы одну строку'),
     })
     .superRefine((val, ctx) => {
       let running = 0;

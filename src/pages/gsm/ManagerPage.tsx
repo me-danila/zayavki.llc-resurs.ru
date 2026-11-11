@@ -28,6 +28,7 @@ import SitesPage from './manager/SitesPage';
 import StaffPage from './manager/StaffPage';
 import InitiatorsPage from './manager/InitiatorsPage';
 import PartsPage from './manager/PartsPage';
+import SettingsPage from './manager/SettingsPage';
 
 export interface ManagerPageProps {
   user: User;
@@ -130,6 +131,7 @@ const ManagerPage: React.FC<ManagerPageProps> = ({ user, onLoggedOut }) => {
             onChanged={loadLots}
           />
         )}
+        {route === '/gsm/settings' && <SettingsPage />}
         {route === '/gsm/sites' && <SitesPage onChanged={loadSites} />}
         {route === '/gsm/staff' && <StaffPage user={user} sites={activeSites} />}
         {route === '/gsm/parts' && <PartsPage sites={activeSites} />}

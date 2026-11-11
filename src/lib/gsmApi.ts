@@ -101,7 +101,15 @@ export async function getSites(): Promise<Site[]> {
     id: s.id,
     name: s.name,
     active: Boolean(s.active),
+    allowBackdatedWriteoffs: s.allowBackdatedWriteoffs,
   }));
+}
+
+export async function setWriteoffPolicy(id: number, allowBackdatedWriteoffs: boolean): Promise<void> {
+  await request<void>(`/sites/${id}/writeoff-policy`, {
+    method: 'PATCH',
+    body: { allowBackdatedWriteoffs },
+  });
 }
 
 // POST /sites {name} → {id}. 400 {error:'invalid'} / 409 {error:'exists'} → ApiError.
@@ -132,6 +140,7 @@ export async function getActiveSites(): Promise<Site[]> {
     id: s.id,
     name: s.name,
     active: Boolean(s.active),
+    allowBackdatedWriteoffs: s.allowBackdatedWriteoffs,
   }));
 }
 
@@ -144,6 +153,7 @@ export async function getTransferTargets(): Promise<Site[]> {
     id: s.id,
     name: s.name,
     active: Boolean(s.active),
+    allowBackdatedWriteoffs: s.allowBackdatedWriteoffs,
   }));
 }
 

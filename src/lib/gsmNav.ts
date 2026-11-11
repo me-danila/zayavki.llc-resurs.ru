@@ -15,6 +15,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/gsm', label: 'Приход ГСМ' },
   { href: '/gsm/parts', label: 'Материалы' },
   { href: '/gsm/stock', label: 'Остатки' },
+  { href: '/gsm/settings', label: 'Настройки' },
   { href: '/gsm/sites', label: 'Участки', permission: 'sites.manage' },
   { href: '/gsm/staff', label: 'Сотрудники', permission: 'users.manage' },
   { href: '/gsm/initiators', label: 'Инициаторы', permission: 'initiators.manage' },
